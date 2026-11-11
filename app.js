@@ -972,13 +972,13 @@ function renderTracks() {
     const earlier = document.createElement("button");
     earlier.type = "button";
     earlier.textContent = "◀ 10 ms";
-    earlier.title = "Avancer cette piste de 10 ms";
-    earlier.addEventListener("click", () => nudgeTrack(track, -10));
+    earlier.title = "Avancer cette piste de 10 ms (elle démarre plus tôt)";
+    earlier.addEventListener("click", () => nudgeTrack(track, 10));
     const later = document.createElement("button");
     later.type = "button";
     later.textContent = "10 ms ▶";
-    later.title = "Retarder cette piste de 10 ms";
-    later.addEventListener("click", () => nudgeTrack(track, 10));
+    later.title = "Retarder cette piste de 10 ms (elle démarre plus tard)";
+    later.addEventListener("click", () => nudgeTrack(track, -10));
     const reset = document.createElement("button");
     reset.type = "button";
     reset.textContent = nudgeMs ? "↺ 0" : "0";
@@ -1020,35 +1020,43 @@ function renderTracks() {
 
 /* --------------------------- recalage d'une piste ----------------------- */
 
-/* Décale réellement les échantillons et mémorise le cumul, pour qu'il reste
-   visible sur la piste et qu'il survive à une sauvegarde du projet. */
-async function shiftTrack(track, ms) {
-  if (!ms) return;
+/* Convention de signe UNIQUE dans toute l'application, identique au champ
+   « Décalage matériel » : POSITIF = la piste est avancée (elle démarre plus tôt),
+   NÉGATIF = la piste est retardée. Avancer revient à couper des échantillons au
+   début ; retarder revient à en ajouter. */
+async function shiftTrack(track, advanceMs) {
+  if (!advanceMs) return;
   const pcm = await readPcm16(track.blob);
-  const shift = Math.round((ms / 1000) * pcm.sampleRate);
-  let out;
+  const samples = Math.round((advanceMs / 1000) * pcm.sampleRate);
+  if (!samples) return;
 
-  if (shift > 0) {
-    out = new Int16Array(pcm.samples.length + shift);
-    out.set(pcm.samples, shift);
-  } else {
-    const cut = Math.min(-shift, pcm.samples.length);
+  let out;
+  if (samples > 0) {
+    const cut = Math.min(samples, pcm.samples.length);
     out = pcm.samples.slice(cut);
+  } else {
+    out = new Int16Array(pcm.samples.length - samples);
+    out.set(pcm.samples, -samples);
   }
 
   track.blob = wavFromInt16(out, pcm.sampleRate, 1);
   track.duration = out.length / pcm.sampleRate;
-  track.nudgeMs = Math.round((track.nudgeMs || 0) + ms);
+  track.nudgeMs = Math.round((track.nudgeMs || 0) + advanceMs);
   await storeItem("tracks", track);
   bufferCache.delete(`${track.id}:${track.createdAt}`);
   renderTracks();
 }
 
-async function nudgeTrack(track, ms) {
+function signed(ms) {
+  return `${ms > 0 ? "+" : ""}${ms} ms`;
+}
+
+async function nudgeTrack(track, advanceMs) {
   if (state !== "idle") { setStatus("Arrête la lecture ou l'enregistrement pour recaler une piste."); return; }
   try {
-    await shiftTrack(track, ms);
-    setStatus(`${track.name || "Piste"} recalée de ${ms > 0 ? "+" : ""}${ms} ms — calage total ${track.nudgeMs > 0 ? "+" : ""}${track.nudgeMs} ms.`);
+    await shiftTrack(track, advanceMs);
+    const action = advanceMs > 0 ? `avancée de ${advanceMs} ms` : `retardée de ${-advanceMs} ms`;
+    setStatus(`${track.name || "Piste"} ${action} — calage total ${signed(track.nudgeMs)}.`);
   } catch (error) {
     setStatus(`Recalage impossible : ${error.message}`);
   }
@@ -1063,10 +1071,27 @@ async function resetNudge(track) {
     track.nudgeMs = 0;
     await storeItem("tracks", track);
     renderTracks();
-    setStatus(`Calage de ${track.name || "la piste"} remis à 0 ms (${total > 0 ? "+" : ""}${total} ms annulés).`);
+    setStatus(`Calage de ${track.name || "la piste"} remis à 0 ms (${signed(total)} annulé).`);
   } catch (error) {
     setStatus(`Remise à zéro impossible : ${error.message}`);
   }
+}
+
+/* Le sens du calage a été inversé pour coller au champ « Décalage matériel » :
+   les pistes recalées avec l'ancienne convention doivent être retournées une
+   fois, sinon leur étiquette ment sur le sens du décalage. */
+async function migrateNudgeSign() {
+  if (localStorage.getItem("voicelayer-nudge-sign-v2")) return 0;
+  let changed = 0;
+  for (const track of tracks) {
+    if (typeof track.nudgeMs === "number" && track.nudgeMs !== 0) {
+      track.nudgeMs = -track.nudgeMs;
+      await storeItem("tracks", track);
+      changed++;
+    }
+  }
+  localStorage.setItem("voicelayer-nudge-sign-v2", "1");
+  return changed;
 }
 
 /* ------------------------------ export mix ------------------------------ */
@@ -1398,6 +1423,7 @@ if ("serviceWorker" in navigator) {
     }
 
     await ensurePeaks();
+    await migrateNudgeSign();
     renderTracks();
 
     ui.engine.textContent = `Moteur PCM ${ctx.sampleRate} Hz`;

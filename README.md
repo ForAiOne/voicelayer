@@ -90,8 +90,13 @@ Deux façons de le régler :
   Il est mémorisé pour le micro sélectionné. Positif avance la prise.
 - **Après la prise** : boutons **◀ 10 ms** / **10 ms ▶** sur la piste, qui recalent
   l'enregistrement déjà fait, par pas de 10 ms, sans ré-enregistrer. Le calage cumulé
-  s'affiche en permanence sur la piste (`calage +40 ms`) et le bouton **↺ 0** l'annule.
+  s'affiche en permanence sur la piste (`calage +20 ms`) et le bouton **↺ 0** l'annule.
   Il est conservé dans la sauvegarde du projet.
+
+Convention de signe, la même partout : **positif = la piste est avancée** (elle démarre
+plus tôt, parce que la voix était arrivée en retard), **négatif = retardée**. Le nombre
+trouvé avec les boutons se recopie donc tel quel dans le champ **Décalage matériel (ms)**
+pour ne plus avoir à le refaire sur les prises suivantes.
 
 Méthode de calibration : enregistre en chantant par-dessus une piste existante, écoute
 le résultat, puis recale la nouvelle piste jusqu'à ce que les deux attaques coïncident.

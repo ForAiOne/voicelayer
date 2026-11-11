@@ -206,23 +206,37 @@ function check(name, ok, detail) {
   check("mute d'une piste respecté dans l'export", mixTrackMuted.peak < 0.01, `crête ${mixTrackMuted.peak.toFixed(4)}`);
   await page.click(".track-actions button:nth-child(2)"); // on réactive
 
-  // 7. recalage d'une piste de +10 ms
+  // 7. recalage : AVANCER de 10 ms (cas réel — la voix arrive en retard sur
+  // l'accompagnement). Convention : positif = avancé, comme le champ matériel.
   const before = await page.evaluate(() => document.querySelector(".track-subtitle").textContent);
-  await page.click(".nudge button:nth-child(2)");
+  await page.click(".nudge button:nth-child(1)");
   await page.waitForTimeout(900);
   const after = await page.evaluate(async () => {
     const db = await new Promise((res, rej) => { const r = indexedDB.open("voicelayer-db", 1); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
     const all = await new Promise((res, rej) => { const r = db.transaction("tracks").objectStore("tracks").getAll(); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
     return all[0].duration;
   });
-  check("recalage +10 ms appliqué", Math.abs(after - (wav.duration + 0.01)) < 0.002, `${before} → ${after.toFixed(3)} s`);
+  check("avancer de 10 ms raccourcit la piste de 10 ms", Math.abs(after - (wav.duration - 0.01)) < 0.002, `${before} → ${after.toFixed(3)} s`);
 
   // 7 bis. le calage doit être visible en permanence sur la piste
   const nudgeLabel = await page.textContent(".track-subtitle");
   const nudgeTotal = await page.evaluate(() => tracks[0].nudgeMs);
-  check("calage cumulé affiché sur la piste", /calage \+10 ms/.test(nudgeLabel) && nudgeTotal === 10, nudgeLabel);
+  check("calage cumulé affiché, signe positif = avancé", /calage \+10 ms/.test(nudgeLabel) && nudgeTotal === 10, nudgeLabel);
 
-  // 7 ter. le bouton de remise à zéro annule le calage
+  // 7 ter. retarder de 10 ms annule l'avance (même convention)
+  await page.click(".nudge button:nth-child(2)");
+  await page.waitForTimeout(900);
+  const afterLater = await page.evaluate(() => ({ nudgeMs: tracks[0].nudgeMs, label: document.querySelector(".track-subtitle").textContent }));
+  check("retarder annule l'avance, retour à 0", afterLater.nudgeMs === 0 && !/calage/.test(afterLater.label), `${afterLater.nudgeMs} · ${afterLater.label}`);
+
+  // 7 quater. avancer de 20 ms puis remise à zéro (le cas mesuré par l'utilisateur)
+  await page.click(".nudge button:nth-child(1)");
+  await page.waitForTimeout(600);
+  await page.click(".nudge button:nth-child(1)");
+  await page.waitForTimeout(900);
+  const after20 = await page.evaluate(() => ({ nudgeMs: tracks[0].nudgeMs, label: document.querySelector(".track-subtitle").textContent }));
+  check("deux pas de 10 ms = calage +20 ms", after20.nudgeMs === 20 && /calage \+20 ms/.test(after20.label), after20.label);
+
   await page.click(".nudge button:nth-child(3)");
   await page.waitForTimeout(900);
   const afterReset = await page.evaluate(async () => {
