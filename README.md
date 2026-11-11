@@ -59,6 +59,23 @@ enregistrées et la superposition devient inaudible.
 Suno). Le fichier est ramené à la fréquence du projet et devient une piste comme une
 autre : tu peux chanter dessus, la mettre en mute, etc.
 
+## Retour casque (s'entendre en direct)
+
+Bouton **🎧 M'entendre en direct** dans le panneau Microphone. Le micro est renvoyé
+vers la sortie audio, branché **en parallèle** du chemin d'enregistrement : ce que tu
+entends ne change donc rien à ce qui est capté.
+
+- **Casque obligatoire.** Avec des enceintes, le micro reprend le son des haut-parleurs
+  et produit un larsen immédiat — une confirmation le rappelle avant d'activer.
+- Le retour passe par le logiciel : il est décalé de quelques dizaines de ms par rapport
+  à ta voix réelle. C'est normal, et ça ne fausse pas l'enregistrement.
+- **Volume du retour** règle le niveau du casque seulement.
+- Le réglage n'est pas mémorisé : à chaque ouverture, le retour est coupé. C'est
+  volontaire — se retrouver avec un retour actif sur des enceintes produirait un larsen
+  dès la première prise.
+- Le micro se ferme entre deux prises, donc le retour s'arrête aussi. Il reprend tout
+  seul à la prise suivante.
+
 ## Le témoin de silence
 
 Après chaque prise, l'application mesure le niveau réellement capté et l'annonce

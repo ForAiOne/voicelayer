@@ -20,6 +20,11 @@ label{display:block;font-size:.8rem;color:#cbd5e1;margin:12px 0 8px}.project-row
 .mic-state{font-size:.72rem;color:#aab8d0;border:1px solid #34415e;padding:5px 9px;border-radius:99px}
 .mic-state.active{color:#7ee0b2;border-color:#36765e}.mic-state.error{color:#ffb4bd;border-color:#8c4350}
 .level-readout{font-size:.72rem;color:#aab8d0;margin:7px 0 0;font-variant-numeric:tabular-nums}
+.monitor-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:14px;padding-top:12px;border-top:1px solid #26334d}
+.monitor-row .hint{margin:0;flex:1 1 190px}
+.monitor-volume{display:flex;align-items:center;gap:8px;margin:0;font-size:.75rem;color:#cbd5e1}
+.monitor-volume input{width:min(130px,32vw);accent-color:#8db5ff}
+#monitorBtn[aria-pressed="true"]{background:#3f5f9a;color:#fff;box-shadow:0 0 0 1px #8db5ff inset}
 .offset-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:6px}.offset-row label{margin:0}.offset-row input{width:86px;background:#0d1528;border:1px solid #34415e;border-radius:10px;color:white;padding:9px 10px;text-align:center}
 .offset-row .hint{margin:0;flex:1 1 200px}
 .tracks-section{margin-top:25px}.tracks-list{display:grid;gap:10px;margin-top:14px}

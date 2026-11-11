@@ -34,6 +34,7 @@ const ui = {
   micSelect: $("micSelect"), refreshMics: $("refreshMicsBtn"), testMic: $("testMicBtn"),
   micTestText: $("micTestText"), micState: $("micState"), meter: $("meterFill"), offset: $("offsetMs"),
   micInfo: $("micInfo"), levelReadout: $("levelReadout"),
+  monitorBtn: $("monitorBtn"), monitorVolume: $("monitorVolume"), monitorHint: $("monitorHint"),
   record: $("recordBtn"), stop: $("stopBtn"), play: $("playBtn"), timer: $("timer"), status: $("statusMessage"),
   list: $("tracks"), count: $("trackCount"), export: $("exportBtn"), muteAll: $("muteAllBtn"), mixHint: $("mixHint"),
 };
@@ -43,6 +44,7 @@ let micStream = null, micSource = null, analyser = null, meterFrame = null, mete
 let meterFloat = null, maxMicPeak = 0, recPeak = 0, maxRecPeak = 0, micArmedDevice = null;
 let fallbackRecorder = null, fallbackChunks = [];
 let recorderNode = null, silentGain = null, pendingCapture = null;
+let monitorGain = null, monitoring = false;
 let testActive = false;
 
 let tracks = [];
@@ -271,6 +273,68 @@ async function initRecorder() {
   };
 }
 
+/* ------------------------- retour casque (monitoring) -------------------- */
+
+/* Le micro est renvoyé vers la sortie audio : l'utilisateur s'entend en direct.
+   Branchement PARALLÈLE au chemin d'enregistrement — le retour ne modifie donc
+   jamais ce qui est capté. Gain à 0 par défaut : sans casque, ça hurle. */
+function ensureMonitor() {
+  if (monitorGain || !ctx) return monitorGain;
+  monitorGain = ctx.createGain();
+  monitorGain.gain.value = 0;
+  monitorGain.connect(ctx.destination);
+  return monitorGain;
+}
+
+function applyMonitorGain() {
+  if (!monitorGain || !ctx) return;
+  const volume = Number(ui.monitorVolume.value);
+  const target = monitoring ? (Number.isFinite(volume) ? volume : 1) : 0;
+  // Affectation directe, sans automatisation : quand le micro est fermé (entre
+  // deux prises) le noeud n'est plus rendu par le graphe, et une valeur
+  // programmée par setValueAtTime reste alors bloquée à son ancienne valeur.
+  // Ici la valeur appliquée est toujours celle qu'on lit.
+  monitorGain.gain.value = target;
+}
+
+function updateMonitorUi() {
+  ui.monitorBtn.textContent = monitoring ? "🎧 Retour casque activé" : "🎧 M'entendre en direct";
+  ui.monitorBtn.setAttribute("aria-pressed", String(monitoring));
+  ui.monitorVolume.parentElement.hidden = !monitoring;
+  ui.monitorHint.textContent = monitoring
+    ? "Actif pendant le test et les prises. Le micro se ferme entre deux : le retour s'arrête aussi."
+    : "Casque obligatoire : avec des enceintes, larsen immédiat.";
+}
+
+async function toggleMonitoring() {
+  try {
+    if (!monitoring) {
+      const ok = confirm("Mets un casque avant d'activer.\n\nSans casque, le micro reprend le son des haut-parleurs et produit un larsen immédiat.\n\nActiver le retour casque ?");
+      if (!ok) return;
+
+      await ensureCtx();
+      await initRecorder();
+      ensureMonitor();
+      await armMic();          // ouvre le micro et branche le retour
+      monitoring = true;
+      applyMonitorGain();
+      updateMonitorUi();
+      startMeter();
+      setStatus("Retour casque activé : tu t'entends en direct. Le retour passe par le logiciel, il est donc décalé de quelques dizaines de ms — c'est normal. Baisse « Volume du retour » en cas de sifflement.");
+    } else {
+      monitoring = false;
+      applyMonitorGain();
+      updateMonitorUi();
+      setStatus("Retour casque coupé.");
+    }
+  } catch (error) {
+    monitoring = false;
+    applyMonitorGain();
+    updateMonitorUi();
+    setStatus(`Retour casque impossible : ${friendlyMicError(error)}`);
+  }
+}
+
 async function refreshMicrophones() {
   if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
     setStatus("La liste des microphones n'est pas disponible dans ce navigateur.");
@@ -340,6 +404,9 @@ async function armMic() {
 
   micSource = ctx.createMediaStreamSource(micStream);
   micSource.connect(recorderNode);
+  ensureMonitor();
+  micSource.connect(monitorGain);
+  applyMonitorGain();
 
   analyser = ctx.createAnalyser();
   analyser.fftSize = 1024;
@@ -1365,6 +1432,8 @@ ui.play.addEventListener("click", () => {
 ui.export.addEventListener("click", exportMix);
 ui.newProject.addEventListener("click", clearProject);
 ui.testMic.addEventListener("click", toggleMicTest);
+ui.monitorBtn.addEventListener("click", toggleMonitoring);
+ui.monitorVolume.addEventListener("input", applyMonitorGain);
 ui.refreshMics.addEventListener("click", refreshMicrophones);
 ui.muteAll.addEventListener("click", () => setMasterMuted(!allMuted));
 

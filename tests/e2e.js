@@ -88,6 +88,20 @@ function check(name, ok, detail) {
   await page.click("#testMicBtn");
   await page.waitForTimeout(300);
 
+  // 2 bis. retour casque : le micro est renvoyé vers la sortie, en parallèle du
+  // chemin d'enregistrement.
+  page.on("dialog", (d) => d.accept());
+  await page.click("#monitorBtn");
+  await page.waitForTimeout(700);
+  const monOn = await page.evaluate(() => ({
+    monitoring,
+    gain: monitorGain ? monitorGain.gain.value : null,
+    pressed: document.getElementById("monitorBtn").getAttribute("aria-pressed"),
+    volumeVisible: !document.getElementById("monitorVolume").parentElement.hidden,
+  }));
+  check("retour casque : gain ouvert", monOn.monitoring === true && monOn.gain > 0.5, `gain ${monOn.gain}`);
+  check("retour casque : bouton et volume affichés", monOn.pressed === "true" && monOn.volumeVisible, JSON.stringify(monOn));
+
   // 3. annulation pendant le décompte : aucune piste, retour à l'état prêt
   await page.click("#recordBtn");
   await page.waitForTimeout(1200);
@@ -158,6 +172,16 @@ function check(name, ok, detail) {
   const subtitle = await page.textContent(".track-subtitle");
   check("niveau capté annoncé après la prise", /niveau max \d+ %/.test(recStatus), recStatus);
   check("prise non marquée silencieuse", !/SILENCIEUSE/.test(subtitle) && !/SILENCIEUSE/.test(recStatus), subtitle);
+
+  // 3 ter. couper le retour casque : le gain doit retomber à zéro
+  await page.click("#monitorBtn");
+  await page.waitForTimeout(500);
+  const monOff = await page.evaluate(() => ({
+    monitoring,
+    gain: monitorGain ? monitorGain.gain.value : null,
+    pressed: document.getElementById("monitorBtn").getAttribute("aria-pressed"),
+  }));
+  check("retour casque : coupé proprement", monOff.monitoring === false && monOff.gain < 0.05 && monOff.pressed === "false", JSON.stringify(monOff));
 
   // 4. export du mix
   const dl = await Promise.all([
