@@ -431,6 +431,51 @@ function check(name, ok, detail) {
   check("⏮ Début ramène le curseur à zéro", phReset.display === "block" && phReset.left <= 0.5,
     `à ${phReset.left.toFixed(1)} %`);
 
+  // 8 quinquies. cliquer sur la timeline place le curseur là où on clique
+  const waveRow = page.locator(".wave-row").first();
+  await waveRow.scrollIntoViewIfNeeded();
+  const rowBox = await waveRow.boundingBox();
+  // locator.click gère le défilement et les coordonnées relatives à l'élément :
+  // page.mouse.click viserait des coordonnées de viewport et raterait la ligne.
+  const clickAt = (ratio) => waveRow.click({ position: { x: Math.round(rowBox.width * ratio), y: Math.round(rowBox.height / 2) } });
+
+  await clickAt(0.5);
+  await page.waitForTimeout(250);
+  const seekMid = await page.evaluate(() => ({
+    positionMs: Math.round(positionMs),
+    total: projectDuration(),
+    mark: parseFloat(document.querySelector(".wave-playhead").style.left),
+    readout: document.getElementById("positionReadout").textContent,
+  }));
+  check("clic à mi-timeline place le curseur",
+    Math.abs(seekMid.positionMs - seekMid.total * 500) < 250 && Math.abs(seekMid.mark - 50) <= 2,
+    `${seekMid.positionMs} ms sur ${Math.round(seekMid.total * 1000)} ms · curseur ${seekMid.mark.toFixed(1)} %`);
+
+  await clickAt(0.25);
+  await page.waitForTimeout(250);
+  const seekQuarter = await page.evaluate(() => ({
+    positionMs: Math.round(positionMs),
+    total: projectDuration(),
+    mark: parseFloat(document.querySelector(".wave-playhead").style.left),
+  }));
+  check("un second clic déplace le curseur",
+    Math.abs(seekQuarter.positionMs - seekQuarter.total * 250) < 250 && Math.abs(seekQuarter.mark - 25) <= 2,
+    `${seekQuarter.positionMs} ms · curseur ${seekQuarter.mark.toFixed(1)} %`);
+
+  // pendant la lecture, cliquer reprend depuis l'endroit cliqué
+  await page.click("#toStartBtn");
+  await page.click("#playBtn");
+  await page.waitForTimeout(600);
+  await clickAt(0.75);
+  await page.waitForTimeout(500);
+  const seekPlaying = await page.evaluate(() => ({ state, positionMs: Math.round(positionMs), total: projectDuration() }));
+  await page.click("#playBtn");           // pause
+  await page.waitForTimeout(200);
+  await page.click("#toStartBtn");
+  check("cliquer pendant la lecture reprend depuis ce point",
+    seekPlaying.state === "playing" && seekPlaying.positionMs > seekPlaying.total * 1000 * 0.7,
+    `${seekPlaying.state} · ${seekPlaying.positionMs} ms sur ${Math.round(seekPlaying.total * 1000)} ms`);
+
   // 9. le retour casque ne doit JAMAIS être mémorisé : sur téléphone, un retour
   // resté actif au rechargement produirait un larsen dès l'ouverture.
   await page.reload({ waitUntil: "load" });
@@ -477,7 +522,19 @@ function check(name, ok, detail) {
     pausedState.markDisplay === "block" && pausedState.markFrozen && Math.abs(pausedState.markLeft - expectedPause) <= 1.5,
     `affiché=${pausedState.markDisplay} gelé=${pausedState.markFrozen} à ${pausedState.markLeft.toFixed(1)} % (attendu ${expectedPause.toFixed(1)} %)`);
 
-  const takeStart = pausedState.positionMs;
+  // reprendre doit CONTINUER depuis la pause, pas repartir de zéro (piège
+  // classique : ms comparées à des secondes)
+  await page.click("#playBtn");
+  await page.waitForTimeout(600);
+  const resumed = await page.evaluate(() => ({ state, positionMs: Math.round(positionMs) }));
+  check("reprendre continue depuis la pause",
+    resumed.state === "playing" && resumed.positionMs >= pausedState.positionMs,
+    `${resumed.state} · ${resumed.positionMs} ms (pause à ${pausedState.positionMs} ms)`);
+
+  await page.click("#playBtn");            // re-pause
+  await page.waitForTimeout(250);
+  const takeStart = await page.evaluate(() => Math.round(positionMs));
+
   await page.click("#recordBtn");
   await page.waitForFunction(() => document.getElementById("micState").textContent === "Enregistrement", null, { timeout: 20000 });
   await page.waitForTimeout(1500);

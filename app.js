@@ -56,6 +56,9 @@ let allMuted = localStorage.getItem(MUTE_PREF_KEY) === "true";
 let state = "idle";                 // idle | countdown | recording | playing
 let captureStartAt = 0, captureFirstTime = -1;
 let playSources = [], playGains = new Map();
+// génération de lecture : tout gestionnaire « fin de source » d'une lecture
+// précédente doit être ignoré, sinon il coupe la lecture suivante.
+let playToken = 0;
 let bufferCache = new Map();
 let timerInterval = null;
 let countdownInterval = null;
@@ -587,6 +590,10 @@ function gainFor(track) {
 }
 
 function stopPlayback(keepPosition = false) {
+  // invalide les gestionnaires « fin de source » des lectures précédentes :
+  // sans ça, une source arrêtée par un déplacement du curseur déclenche son
+  // « ended » APRÈS le redémarrage et coupe la nouvelle lecture.
+  playToken++;
   playSources.forEach((s) => { try { s.stop(); } catch { } });
   playSources = [];
   playGains.clear();
@@ -652,11 +659,13 @@ async function playAll(fromMs = positionMs) {
   try {
     await ensureCtx();
     stopPlayback(true);
+    const token = playToken;
     setStatus("Préparation de la lecture…");
 
     // au-delà de la fin, on repart du début plutôt que de ne rien jouer
+    // (fromMs est en millisecondes, total en secondes : comparer les mêmes unités)
     const total = projectDuration();
-    const from = Math.max(0, fromMs >= total - 0.05 ? 0 : fromMs);
+    const from = Math.max(0, fromMs >= (total - 0.05) * 1000 ? 0 : fromMs);
 
     const items = [];
     for (const track of tracks) {
@@ -688,6 +697,7 @@ async function playAll(fromMs = positionMs) {
     let ended = 0;
     sources.forEach((source) => {
       source.addEventListener("ended", () => {
+        if (token !== playToken) return;
         ended++;
         if (ended === sources.length && state === "playing") stopPlayback();
       }, { once: true });
@@ -702,6 +712,7 @@ async function playSingle(track) {
   try {
     await ensureCtx();
     stopPlayback(true);
+    const token = playToken;
     const buffer = await bufferFor(track);
     const startAt = ctx.currentTime + 0.05;
     const startMs = track.startMs || 0;
@@ -711,7 +722,7 @@ async function playSingle(track) {
     ui.play.textContent = "⏸ Pause";
     setStatus(`Lecture : ${track.name || "piste"}.`);
     const source = playSources[0];
-    source.addEventListener("ended", () => { if (state === "playing") stopPlayback(); }, { once: true });
+    source.addEventListener("ended", () => { if (token === playToken && state === "playing") stopPlayback(); }, { once: true });
   } catch (error) {
     setStatus(`Lecture impossible : ${error.message}`);
   }
@@ -1263,6 +1274,41 @@ function paintPlayhead(ms, frozen = true) {
   });
 }
 
+/* ------------------- placement du curseur à la souris -------------------- */
+
+/* Cliquer (ou glisser) sur une forme d'onde place le curseur à cet endroit de
+   la timeline. Pendant la lecture, la position est reprise au relâchement pour
+   ne pas relancer le son à chaque pixel parcouru. */
+let scrub = null;
+
+function beginScrub(event, element) {
+  if (state !== "idle" && state !== "paused" && state !== "playing") return;
+  if (!projectDuration()) return;
+  scrub = { wasPlaying: state === "playing", element };
+  if (scrub.wasPlaying) stopPlayback(true);
+  try { element.setPointerCapture(event.pointerId); } catch { }
+  applyScrub(event);
+}
+
+function applyScrub(event) {
+  if (!scrub) return;
+  const box = scrub.element.getBoundingClientRect();
+  const total = projectDuration();
+  if (!box.width || !total) return;
+  const ratio = Math.max(0, Math.min(1, (event.clientX - box.left) / box.width));
+  positionMs = Math.round(ratio * total * 1000);
+  updatePositionUi();
+  paintPlayhead(positionMs, true);
+}
+
+function endScrub() {
+  if (!scrub) return;
+  const resume = scrub.wasPlaying;
+  scrub = null;
+  if (resume) playAll(positionMs);
+  else setStatus(`Curseur placé à ${fmt(positionMs / 1000)}. « Enregistrer une piste » démarrera à cet endroit.`);
+}
+
 function renderTracks() {
   ui.list.innerHTML = "";
   ui.count.textContent = tracks.length;
@@ -1411,6 +1457,11 @@ function renderTracks() {
     const wavePlayhead = document.createElement("div");
     wavePlayhead.className = "wave-playhead";
     waveRow.append(canvas, wavePlayhead);
+    waveRow.title = "Clique ou glisse ici pour placer le curseur à cet endroit";
+    waveRow.addEventListener("pointerdown", (event) => beginScrub(event, waveRow));
+    waveRow.addEventListener("pointermove", (event) => { if (scrub) applyScrub(event); });
+    waveRow.addEventListener("pointerup", endScrub);
+    waveRow.addEventListener("pointercancel", endScrub);
 
     card.append(head, waveRow, controls);
     ui.list.append(card);

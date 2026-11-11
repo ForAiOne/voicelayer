@@ -88,6 +88,12 @@ Le **curseur reste planté** à l'endroit de la pause (bleu, avec un repère en 
 voit toujours où la suite démarrera. Pendant la lecture il est orange et il avance ; après
 une prise il reste à l'endroit où elle s'est terminée, donc là où repartira la suivante.
 
+**Cliquer sur une forme d'onde place le curseur** à cet endroit de la timeline (curseur
+en croix, la ligne s'éclaircit au survol). On peut aussi **glisser** pour déplacer le
+repère. Pendant la lecture, cliquer déplace la lecture à cet endroit et la reprend ; à
+l'arrêt, le curseur bleu se plante là où tu as cliqué, et « Enregistrer une piste »
+démarrera là.
+
 **Enregistrer en plein milieu** se fait de deux façons, sans réglage préalable :
 
 - **Pause, puis « Enregistrer une piste »** : la nouvelle prise démarre exactement à la
