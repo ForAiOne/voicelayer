@@ -78,6 +78,25 @@ le larsen est immédiat.
 - Le micro se ferme entre deux prises, donc le retour s'arrête aussi. Il reprend tout
   seul à la prise suivante.
 
+## Pause, position et prise en plein milieu
+
+Le bouton **▶ Tout écouter** devient **⏸ Pause** pendant la lecture : il fige la position
+et le bouton **⏮ Début** la ramène à zéro. Sous les boutons, une ligne indique
+`position 00:45 · durée 03:12` et, quand ce n'est pas zéro, `prochaine prise à 00:45`.
+
+**Enregistrer en plein milieu** se fait de deux façons, sans réglage préalable :
+
+- **Pause, puis « Enregistrer une piste »** : la nouvelle prise démarre exactement à la
+  position de pause, et l'accompagnement reprend à cet endroit (pas depuis le début).
+- **« Enregistrer une piste » pendant la lecture** : l'instant courant est figé, la prise
+  démarre là où tu en es.
+
+Chaque piste retient sa **position de départ** (`départ 00:45` sur sa ligne) :
+
+- sa forme d'onde est dessinée à cet endroit de la timeline, pas collée à gauche ;
+- la lecture et l'export la placent au bon moment — le mix reste synchronisé ;
+- un projet peut ainsi dépasser la durée de chaque piste prise séparément.
+
 ## Formes d'onde et synchronisation
 
 Chaque piste affiche sa forme d'onde sous son nom, avec une règle de temps au-dessus de

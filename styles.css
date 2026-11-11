@@ -45,5 +45,7 @@ label{display:block;font-size:.8rem;color:#cbd5e1;margin:12px 0 8px}.project-row
 .wave-row{position:relative;background:#0e1728;padding:2px 0 10px}
 .wave-row canvas{display:block;width:100%;height:42px}
 .wave-playhead{position:absolute;top:0;bottom:0;width:2px;background:#ffb86b;box-shadow:0 0 6px #ffb86b;display:none;pointer-events:none}
+.position-readout{font-size:.73rem;color:#aab8d0;margin:10px 0 0;font-variant-numeric:tabular-nums}
+.position-readout strong{color:#8db5ff;font-weight:600}
 footer{border-top:1px solid #26334d;margin-top:28px;padding-top:14px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
 @media(max-width:520px){.app{padding:18px 13px 36px}.panel{padding:15px}.transport-buttons{display:grid;grid-template-columns:1fr 1fr}.button-record{grid-column:1/-1}.section-heading{align-items:flex-end}.button-export{padding:10px 11px;font-size:.8rem}.mic-test-row{align-items:flex-start}.mic-test-row .hint{flex:1;min-width:130px}.track-actions{justify-content:flex-start}}

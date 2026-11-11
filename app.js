@@ -35,6 +35,7 @@ const ui = {
   micTestText: $("micTestText"), micState: $("micState"), meter: $("meterFill"), offset: $("offsetMs"),
   micInfo: $("micInfo"), levelReadout: $("levelReadout"),
   monitorBtn: $("monitorBtn"), monitorVolume: $("monitorVolume"), monitorHint: $("monitorHint"),
+  position: $("positionReadout"), toStart: $("toStartBtn"),
   record: $("recordBtn"), stop: $("stopBtn"), play: $("playBtn"), timer: $("timer"), status: $("statusMessage"),
   list: $("tracks"), count: $("trackCount"), export: $("exportBtn"), muteAll: $("muteAllBtn"), mixHint: $("mixHint"),
 };
@@ -45,6 +46,9 @@ let meterFloat = null, maxMicPeak = 0, recPeak = 0, maxRecPeak = 0, micArmedDevi
 let fallbackRecorder = null, fallbackChunks = [];
 let recorderNode = null, silentGain = null, pendingCapture = null;
 let monitorGain = null, monitoring = false;
+// position dans le projet, en millisecondes : c'est l'endroit d'où repart la
+// lecture et où démarrera la prochaine prise.
+let positionMs = 0, playBaseMs = 0, captureStartMs = 0;
 let testActive = false;
 
 let tracks = [];
@@ -582,25 +586,52 @@ function gainFor(track) {
   return (allMuted || track.muted) ? 0 : (typeof track.volume === "number" ? track.volume : 1);
 }
 
-function stopPlayback() {
+function stopPlayback(keepPosition = false) {
   playSources.forEach((s) => { try { s.stop(); } catch { } });
   playSources = [];
   playGains.clear();
   stopPlayhead();
+  if (!keepPosition) positionMs = 0;
   if (state === "playing") state = "idle";
   ui.play.textContent = "▶ Tout écouter";
+  updatePositionUi();
 }
 
-async function scheduleTracks(items, when) {
+function pausePlayback() {
+  if (state !== "playing") return;
+  freezePosition();
+  const at = positionMs;
+  stopPlayback(true);
+  state = "paused";
+  ui.play.textContent = "▶ Reprendre";
+  updatePositionUi();
+  setStatus(`Pause à ${fmt(at / 1000)}. « Reprendre » continue la lecture, et « Enregistrer une piste » fera démarrer la nouvelle prise à cet instant.`);
+}
+
+function backToStart() {
+  if (state === "playing") stopPlayback();
+  positionMs = 0;
+  updatePositionUi();
+  setStatus("Position remise au début du projet.");
+}
+
+/* Chaque piste a une position de départ dans le projet (startMs). Depuis une
+   position fromMs, une piste déjà commencée reprend en plein milieu de son
+   tampon (offset), une piste à venir est décalée dans le temps (delay). */
+async function scheduleTracks(items, when, fromMs = 0) {
   const sources = [];
   for (const item of items) {
+    const delay = (item.startMs || 0) / 1000 - fromMs / 1000;
+    const offset = delay < 0 ? -delay : 0;
+    if (offset >= item.buffer.duration) continue;
+
     const source = ctx.createBufferSource();
     const gain = ctx.createGain();
     source.buffer = item.buffer;
     gain.gain.value = item.gain;
     source.connect(gain).connect(ctx.destination);
-    if (when !== undefined) source.start(when);
-    else source.start();
+    const at = (when === undefined ? ctx.currentTime : when) + Math.max(0, delay);
+    source.start(at, offset);
     sources.push(source);
     if (item.id) {
       playGains.set(item.id, gain);
@@ -613,23 +644,40 @@ async function scheduleTracks(items, when) {
   return sources;
 }
 
-async function playAll() {
+async function playAll(fromMs = positionMs) {
   if (!tracks.length) return;
   try {
     await ensureCtx();
-    stopPlayback();
+    stopPlayback(true);
     setStatus("Préparation de la lecture…");
+
+    // au-delà de la fin, on repart du début plutôt que de ne rien jouer
+    const total = projectDuration();
+    const from = Math.max(0, fromMs >= total - 0.05 ? 0 : fromMs);
 
     const items = [];
     for (const track of tracks) {
-      items.push({ id: track.id, buffer: await bufferFor(track), gain: gainFor(track) });
+      items.push({
+        id: track.id,
+        buffer: await bufferFor(track),
+        gain: gainFor(track),
+        startMs: track.startMs || 0,
+      });
     }
 
     const startAt = ctx.currentTime + 0.1;
-    const sources = await scheduleTracks(items, startAt);
+    const sources = await scheduleTracks(items, startAt, from);
+    if (!sources.length) {
+      state = "idle";
+      setStatus("Rien à écouter à partir de cette position.");
+      return;
+    }
+
     state = "playing";
-    startPlayhead(startAt);
-    ui.play.textContent = "■ Arrêter l'écoute";
+    positionMs = from;
+    startPlayhead(startAt, from);
+    updatePositionUi();
+    ui.play.textContent = "⏸ Pause";
     setStatus(allMuted
       ? "Lecture lancée, mais TOUTES LES PISTES SONT MUETTES : tu n'entendras rien. Clique « Réactiver toutes les pistes »."
       : "Lecture de toutes les pistes.");
@@ -650,13 +698,14 @@ async function playAll() {
 async function playSingle(track) {
   try {
     await ensureCtx();
-    stopPlayback();
+    stopPlayback(true);
     const buffer = await bufferFor(track);
     const startAt = ctx.currentTime + 0.05;
-    await scheduleTracks([{ id: track.id, buffer, gain: gainFor(track) }], startAt);
+    const startMs = track.startMs || 0;
+    await scheduleTracks([{ id: track.id, buffer, gain: gainFor(track), startMs }], startAt, startMs);
     state = "playing";
-    startPlayhead(startAt);
-    ui.play.textContent = "■ Arrêter l'écoute";
+    startPlayhead(startAt, startMs);
+    ui.play.textContent = "⏸ Pause";
     setStatus(`Lecture : ${track.name || "piste"}.`);
     const source = playSources[0];
     source.addEventListener("ended", () => { if (state === "playing") stopPlayback(); }, { once: true });
@@ -678,10 +727,19 @@ function setTransportLocked(locked) {
   ui.importBtn.disabled = locked;
   ui.loadProject.disabled = locked;
   ui.play.disabled = locked;
+  ui.toStart.disabled = locked;
 }
 
 async function startRecording() {
-  if (state !== "idle") return;
+  // Depuis la lecture, on fige l'instant courant : la prise démarrera là où on
+  // en est, sans avoir à arrêter puis repositionner quoi que ce soit.
+  if (state === "playing") {
+    freezePosition();
+    stopPlayback(true);
+  } else if (state !== "idle" && state !== "paused") {
+    return;
+  }
+  captureStartMs = positionMs;
 
   if (tracks.length >= MAX_TRACKS) {
     setStatus(`Limite de ${MAX_TRACKS} pistes atteinte. Supprime une piste pour continuer.`);
@@ -705,17 +763,24 @@ async function startRecording() {
     // créerait précisément le retard qu'on veut supprimer.
     const backing = [];
     for (const track of tracks) {
-      backing.push({ id: track.id, buffer: await bufferFor(track), gain: gainFor(track) });
+      backing.push({
+        id: track.id,
+        buffer: await bufferFor(track),
+        gain: gainFor(track),
+        startMs: track.startMs || 0,
+      });
     }
 
     await armMic();
 
     state = "countdown";
     setTransportLocked(true);
-    stopPlayback();
+    stopPlayback(true);
     startMeter();               // le micro est mesuré pendant le décompte
     ui.timer.textContent = "03";
-    setStatus("Prépare-toi… démarrage dans 3 secondes. Parle : la jauge doit bouger.");
+    setStatus(captureStartMs > 50
+      ? `Prépare-toi… démarrage dans 3 secondes, la prise commencera à ${fmt(captureStartMs / 1000)} du projet.`
+      : "Prépare-toi… démarrage dans 3 secondes. Parle : la jauge doit bouger.");
 
     let count = 3;
     countdownInterval = setInterval(async () => {
@@ -763,9 +828,10 @@ async function launchTake(backing) {
   recorderNode.port.postMessage({ cmd: "start" });
   startFallback();
 
-  if (backing.length) await scheduleTracks(backing, startAt);
+  if (backing.length) await scheduleTracks(backing, startAt, captureStartMs);
 
   state = "recording";
+  startPlayhead(startAt, captureStartMs);
   ui.micState.textContent = "Enregistrement";
   ui.micState.className = "mic-state active";
   setStatus(backing.length
@@ -804,7 +870,9 @@ async function stopRecording() {
   state = "finalizing";
   if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
   if (takeWatchdog) { clearTimeout(takeWatchdog); takeWatchdog = null; }
-  stopPlayback();
+  // on coupe l'accompagnement mais on garde la position : la prise suivante
+  // partira de là si l'utilisateur ne bouge pas le curseur de position.
+  stopPlayback(true);
 
   const done = await new Promise((resolve) => {
     pendingCapture = { resolve };
@@ -872,6 +940,9 @@ async function finalizeTake(data) {
       blob: wavFromInt16(pcm, sampleRate, 1),
       sampleRate,
       duration,
+      // position de la prise sur la ligne de temps du projet : c'est ce qui
+      // permet d'enregistrer en plein milieu de la lecture des autres pistes.
+      startMs: Math.round(captureStartMs),
       peak,
       volume: 1,
       muted: false,
@@ -903,7 +974,8 @@ async function finalizeTake(data) {
     } else {
       ui.micState.textContent = "Prêt";
       ui.micState.className = "mic-state";
-      setStatus(`Piste enregistrée : ${fmt(duration)}, niveau max ${Math.round(peak * 100)} % (${Math.round(track.blob.size / 1024)} Ko).`);
+      setStatus(`Piste enregistrée : ${fmt(duration)}, niveau max ${Math.round(peak * 100)} % (${Math.round(track.blob.size / 1024)} Ko)`
+        + (track.startMs > 50 ? ` · départ ${fmt(track.startMs / 1000)} du projet` : "") + ".");
     }
   } catch (error) {
     setStatus(`Piste non enregistrée : ${error.message}`);
@@ -981,9 +1053,29 @@ function safeName(name) {
 const waveCache = new Map();
 let playheadRaf = null;
 let playStart = null;
+let lastPositionPaint = 0;
 
 function projectDuration() {
-  return tracks.reduce((max, track) => Math.max(max, track.duration || 0), 0);
+  return tracks.reduce((max, track) => Math.max(max, (track.startMs || 0) / 1000 + (track.duration || 0)), 0);
+}
+
+/* On peut modifier les pistes à l'arrêt comme en pause : c'est justement en pause
+   qu'on recale et qu'on décide où démarrera la prise suivante. */
+function canEdit() {
+  return state === "idle" || state === "paused";
+}
+
+function updatePositionUi() {
+  const total = projectDuration();
+  const pos = Math.min(positionMs / 1000, total);
+  ui.position.textContent = `position ${fmt(pos)} · durée ${fmt(total)}`
+    + (positionMs > 0.05 ? ` · prochaine prise à ${fmt(positionMs / 1000)}` : "");
+}
+
+/* Fige la position courante de la lecture, pour pouvoir repartir de là. */
+function freezePosition() {
+  if (!ctx || playStart === null) return;
+  positionMs = playBaseMs + Math.max(0, ctx.currentTime - playStart) * 1000;
 }
 
 async function waveformFor(track) {
@@ -1045,10 +1137,11 @@ function drawWave(canvas, wave, track, total) {
   const norm = Math.min(20, 0.9 / Math.max(0.03, typeof track.peak === "number" ? track.peak : 1));
 
   const count = wave.min.length;
+  const from = Math.min(width, Math.round(((track.startMs || 0) / 1000 / total) * width));
   const span = Math.max(1, (wave.duration / total) * width);
   const columns = Math.max(1, Math.round(span));
 
-  for (let x = 0; x < columns && x < width; x++) {
+  for (let x = 0; x < columns && from + x < width; x++) {
     const b0 = Math.floor((x / columns) * count);
     const b1 = Math.min(count, Math.max(b0 + 1, Math.floor(((x + 1) / columns) * count)));
     let lo = 0;
@@ -1059,7 +1152,7 @@ function drawWave(canvas, wave, track, total) {
     }
     const top = mid - Math.min(1, hi * norm) * (mid - 2);
     const bottom = mid - Math.max(-1, lo * norm) * (mid - 2);
-    g.fillRect(x, top, 1, Math.max(1, bottom - top));
+    g.fillRect(from + x, top, 1, Math.max(1, bottom - top));
   }
 }
 
@@ -1113,22 +1206,32 @@ function drawAllWaves() {
 }
 
 function tickPlayhead() {
-  if (state !== "playing" || !ctx || playStart === null) {
+  const active = state === "playing" || state === "recording";
+  if (!active || !ctx || playStart === null) {
     stopPlayhead();
     return;
   }
   const total = projectDuration() || 1;
   const elapsed = Math.max(0, ctx.currentTime - playStart);
-  const pct = Math.min(100, (elapsed / total) * 100);
+  const currentMs = playBaseMs + elapsed * 1000;
+  const pct = Math.min(100, (currentMs / 1000 / total) * 100);
   document.querySelectorAll(".wave-playhead").forEach((el) => {
     el.style.display = "block";
     el.style.left = `${pct.toFixed(3)}%`;
   });
+  // la position affichée suit la lecture (rafraîchie 4 fois par seconde)
+  if (ctx.currentTime - lastPositionPaint > 0.25) {
+    lastPositionPaint = ctx.currentTime;
+    positionMs = currentMs;
+    updatePositionUi();
+  }
   playheadRaf = requestAnimationFrame(tickPlayhead);
 }
 
-function startPlayhead(when) {
+function startPlayhead(when, baseMs = 0) {
   playStart = when;
+  playBaseMs = baseMs;
+  lastPositionPaint = 0;
   if (playheadRaf) cancelAnimationFrame(playheadRaf);
   playheadRaf = requestAnimationFrame(tickPlayhead);
 }
@@ -1143,7 +1246,7 @@ function stopPlayhead() {
 function renderTracks() {
   ui.list.innerHTML = "";
   ui.count.textContent = tracks.length;
-  ui.export.disabled = !tracks.length || state !== "idle";
+  ui.export.disabled = !tracks.length || !canEdit();
   updateMuteAllButton();
 
   if (!tracks.length) {
@@ -1181,6 +1284,7 @@ function renderTracks() {
     const sub = document.createElement("div");
     sub.className = "track-subtitle";
     sub.textContent = `${fmt(track.duration || 0)} · WAV ${track.sampleRate || ctx?.sampleRate || 0} Hz · ${Math.round((track.blob?.size || 0) / 1024)} Ko`
+      + (track.startMs > 50 ? ` · départ ${fmt(track.startMs / 1000)}` : "")
       + (nudgeMs ? ` · calage ${nudgeMs > 0 ? "+" : ""}${nudgeMs} ms` : "")
       + (silent ? " · ⚠ SILENCIEUSE (micro sans signal)" : "");
     info.append(title, sub);
@@ -1297,6 +1401,7 @@ function renderTracks() {
   });
 
   alignRuler();
+  updatePositionUi();
 }
 
 /* --------------------------- recalage d'une piste ----------------------- */
@@ -1334,7 +1439,7 @@ function signed(ms) {
 }
 
 async function nudgeTrack(track, advanceMs) {
-  if (state !== "idle") { setStatus("Arrête la lecture ou l'enregistrement pour recaler une piste."); return; }
+  if (!canEdit()) { setStatus("Arrête la lecture ou l'enregistrement pour recaler une piste."); return; }
   try {
     await shiftTrack(track, advanceMs);
     const action = advanceMs > 0 ? `avancée de ${advanceMs} ms` : `retardée de ${-advanceMs} ms`;
@@ -1345,7 +1450,7 @@ async function nudgeTrack(track, advanceMs) {
 }
 
 async function resetNudge(track) {
-  if (state !== "idle") { setStatus("Arrête la lecture ou l'enregistrement pour recaler une piste."); return; }
+  if (!canEdit()) { setStatus("Arrête la lecture ou l'enregistrement pour recaler une piste."); return; }
   if (!track.nudgeMs) return;
   try {
     const total = track.nudgeMs;
@@ -1379,7 +1484,7 @@ async function migrateNudgeSign() {
 /* ------------------------------ export mix ------------------------------ */
 
 async function exportMix() {
-  if (!tracks.length || state !== "idle") return;
+  if (!tracks.length || !canEdit()) return;
 
   ui.export.disabled = true;
   setStatus("Préparation du mixage WAV…");
@@ -1388,17 +1493,24 @@ async function exportMix() {
     const parts = [];
     for (const track of tracks) {
       const pcm = await readPcm16(track.blob);
-      parts.push({ pcm, gain: track.muted ? 0 : (typeof track.volume === "number" ? track.volume : 1) });
+      parts.push({
+        pcm,
+        startMs: track.startMs || 0,
+        gain: track.muted ? 0 : (typeof track.volume === "number" ? track.volume : 1),
+      });
     }
 
     const sampleRate = parts[0].pcm.sampleRate;
-    const length = Math.max(...parts.map((p) => p.pcm.samples.length));
+    const offsetOf = (part) => Math.max(0, Math.round((part.startMs / 1000) * sampleRate));
+    // le mix doit couvrir la piste qui finit le plus tard, départs compris
+    const length = Math.max(...parts.map((part) => offsetOf(part) + part.pcm.samples.length));
     const mix = new Float32Array(length);
 
     for (const part of parts) {
       if (!part.gain) continue;
       const s = part.pcm.samples;
-      for (let i = 0; i < s.length; i++) mix[i] += (s[i] / 32768) * part.gain;
+      const off = offsetOf(part);
+      for (let i = 0; i < s.length && off + i < length; i++) mix[off + i] += (s[i] / 32768) * part.gain;
     }
 
     let peak = 0;
@@ -1417,7 +1529,7 @@ async function exportMix() {
   } catch (error) {
     setStatus(`Erreur pendant l'export : ${error.message}`);
   } finally {
-    ui.export.disabled = !tracks.length || state !== "idle";
+    ui.export.disabled = !tracks.length || !canEdit();
   }
 }
 
@@ -1512,6 +1624,7 @@ async function saveProject() {
         createdAt: track.createdAt,
         sampleRate: track.sampleRate,
         duration: track.duration,
+        startMs: track.startMs || 0,
         nudgeMs: track.nudgeMs || 0,
         peak: typeof track.peak === "number" ? track.peak : undefined,
         wav: arrayBufferToBase64(await track.blob.arrayBuffer()),
@@ -1548,6 +1661,7 @@ async function loadProjectFile(file) {
         blob: new Blob([buffer], { type: "audio/wav" }),
         sampleRate: item.sampleRate || ctx.sampleRate,
         duration: item.duration || 0,
+        startMs: Math.round(item.startMs || 0),
         nudgeMs: Math.round(item.nudgeMs || 0),
         peak: typeof item.peak === "number" ? item.peak : undefined,
         volume: typeof item.volume === "number" ? item.volume : 1,
@@ -1641,9 +1755,11 @@ async function ensurePeaks() {
 ui.record.addEventListener("click", startRecording);
 ui.stop.addEventListener("click", stopRecording);
 ui.play.addEventListener("click", () => {
-  if (state === "playing") { stopPlayback(); setStatus("Lecture arrêtée."); }
-  else if (state === "idle") playAll();
+  // un seul bouton : il lance, met en pause et reprend exactement où on s'est arrêté
+  if (state === "playing") pausePlayback();
+  else if (state === "paused" || state === "idle") playAll(positionMs);
 });
+ui.toStart.addEventListener("click", backToStart);
 ui.export.addEventListener("click", exportMix);
 ui.newProject.addEventListener("click", clearProject);
 ui.testMic.addEventListener("click", toggleMicTest);
@@ -1717,6 +1833,7 @@ if ("serviceWorker" in navigator) {
     await ensurePeaks();
     await migrateNudgeSign();
     renderTracks();
+    updatePositionUi();
 
     ui.engine.textContent = `Moteur PCM ${ctx.sampleRate} Hz`;
   } catch (error) {

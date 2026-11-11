@@ -35,6 +35,29 @@ function parseWav(file) {
   return { ...fmt, frames, duration: frames / fmt.sampleRate, peak, rms: Math.sqrt(sum / Math.max(1, n)), bytes: b.length };
 }
 
+function rmsBetween(file, fromSec, toSec) {
+  const b = fs.readFileSync(file);
+  const tag = (p) => String.fromCharCode(b[p], b[p + 1], b[p + 2], b[p + 3]);
+  let pos = 12, fmt = null, dataOff = 0, dataLen = 0;
+  while (pos + 8 <= b.length) {
+    const id = tag(pos);
+    const size = b.readUInt32LE(pos + 4);
+    if (id === "fmt ") fmt = { channels: b.readUInt16LE(pos + 10), sampleRate: b.readUInt32LE(pos + 12), bits: b.readUInt16LE(pos + 22) };
+    else if (id === "data") { dataOff = pos + 8; dataLen = size; }
+    pos += 8 + size + (size % 2);
+  }
+  const bytesPerFrame = (fmt.channels * fmt.bits) / 8;
+  const from = Math.max(0, Math.round(fromSec * fmt.sampleRate));
+  const to = Math.min(dataLen / bytesPerFrame, Math.round(toSec * fmt.sampleRate));
+  let sum = 0, n = 0;
+  for (let i = from; i < to; i++) {
+    const v = b.readInt16LE(dataOff + i * bytesPerFrame) / 32768;
+    sum += v * v;
+    n++;
+  }
+  return Math.sqrt(sum / Math.max(1, n));
+}
+
 const results = [];
 function check(name, ok, detail) {
   results.push({ name, ok: !!ok, detail });
@@ -409,6 +432,85 @@ function check(name, ok, detail) {
   check("retour casque toujours coupé après rechargement",
     afterReload.monitoring === false && afterReload.pressed === "false" && (afterReload.gain === null || afterReload.gain === 0) && afterReload.stored.length === 0,
     JSON.stringify(afterReload));
+
+  // 10. pause, puis prise qui démarre en plein milieu de la lecture des autres
+  await page.click("#toStartBtn");
+  await page.click("#playBtn");
+  await page.waitForTimeout(1200);
+  await page.click("#playBtn");          // pause
+  await page.waitForTimeout(250);
+  const pausedState = await page.evaluate(() => ({
+    state,
+    positionMs: Math.round(positionMs),
+    readout: document.getElementById("positionReadout").textContent,
+    playLabel: document.getElementById("playBtn").textContent,
+  }));
+  check("pause fige la position de lecture", pausedState.state === "paused" && pausedState.positionMs > 700,
+    `${pausedState.state} · ${pausedState.positionMs} ms`);
+  check("position et départ annoncés", /position \d\d:\d\d/.test(pausedState.readout) && /prochaine prise/.test(pausedState.readout),
+    pausedState.readout);
+
+  const takeStart = pausedState.positionMs;
+  await page.click("#recordBtn");
+  await page.waitForFunction(() => document.getElementById("micState").textContent === "Enregistrement", null, { timeout: 20000 });
+  await page.waitForTimeout(1500);
+  await page.click("#stopBtn");
+  await page.waitForFunction(() => document.getElementById("micState").textContent !== "Enregistrement", null, { timeout: 20000 });
+  await page.waitForTimeout(600);
+
+  const midTake = await page.evaluate(() => {
+    const last = tracks[tracks.length - 1];
+    const subs = [...document.querySelectorAll(".track-subtitle")];
+    return {
+      count: tracks.length,
+      startMs: last.startMs,
+      duration: last.duration,
+      subtitle: subs[subs.length - 1].textContent,
+      projectDuration: projectDuration(),
+    };
+  });
+  check("la prise démarre à la position de pause", Math.abs(midTake.startMs - takeStart) < 300,
+    `${takeStart} ms visés → ${midTake.startMs} ms réels`);
+  check("départ affiché sur la piste", /départ \d\d:\d\d/.test(midTake.subtitle), midTake.subtitle);
+
+  // la forme d'onde doit être dessinée À PARTIR du départ, pas collée à gauche
+  const starts = await page.evaluate(() => [...document.querySelectorAll(".wave-canvas")].map((canvas) => {
+    const data = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
+    for (let x = 0; x < canvas.width; x++) {
+      for (let y = 0; y < canvas.height; y++) {
+        if (data[(y * canvas.width + x) * 4 + 3] > 150) return Math.round((x / canvas.width) * 100);
+      }
+    }
+    return -1;
+  }));
+  const expectedStart = Math.round((midTake.startMs / 1000 / midTake.projectDuration) * 100);
+  check("forme d'onde placée à son départ sur la timeline",
+    Math.abs(starts[starts.length - 1] - expectedStart) <= 4 && starts[0] <= 1,
+    `départs dessinés ${starts.join(" % / ")} % — attendu ${expectedStart} % pour la dernière`);
+
+  // export : la piste doit être audible à partir de son départ, et le silence
+  // doit précéder. Les autres pistes sont mises en mute pour isoler la preuve.
+  await page.evaluate(async () => {
+    const lastId = tracks[tracks.length - 1].id;
+    for (const track of tracks) {
+      track.muted = track.id !== lastId;
+      await storeItem("tracks", track);
+    }
+    renderTracks();
+  });
+  const dlMid = await Promise.all([
+    page.waitForEvent("download", { timeout: 20000 }),
+    page.click("#exportBtn"),
+  ]);
+  const midPath = path.join(OUT, "mix-milieu.wav");
+  await dlMid[0].saveAs(midPath);
+  const midMix = parseWav(midPath);
+  const beforeRms = rmsBetween(midPath, 0.2, midTake.startMs / 1000 - 0.15);
+  const duringRms = rmsBetween(midPath, midTake.startMs / 1000 + 0.1, midTake.startMs / 1000 + midTake.duration - 0.2);
+  check("le mix couvre la durée du projet", Math.abs(midMix.duration - midTake.projectDuration) < 0.2,
+    `${midMix.duration.toFixed(2)} s pour ${midTake.projectDuration.toFixed(2)} s attendues`);
+  check("silence avant le départ de la prise", beforeRms < 0.005, `rms avant ${beforeRms.toFixed(4)}`);
+  check("la prise est audible à son départ dans le mix", duringRms > 0.02, `rms après ${duringRms.toFixed(4)}`);
 
   check("aucune erreur JavaScript", errors.length === 0, errors.slice(0, 3).join(" | ") || "aucune");
 
