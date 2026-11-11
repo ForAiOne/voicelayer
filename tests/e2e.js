@@ -6,11 +6,9 @@ const { chromium } = require("playwright-core");
 const fs = require("fs");
 const path = require("path");
 
-// CHROME : chemin explicite si Playwright n'a pas de navigateur installé.
-// APP_URL : l'app doit être servie en http(s), jamais en file:// (micro + AudioWorklet).
-const CHROME = process.env.CHROME || undefined;
+const CHROME = "/root/.cache/ms-playwright/chromium-1223/chrome-linux64/chrome";
 const URL_APP = process.env.APP_URL || "http://127.0.0.1:8099/index.html";
-const OUT = path.join(__dirname, "out");
+const OUT = "/root/projets/voicelayer/test/out";
 
 function parseWav(file) {
   const b = fs.readFileSync(file);
@@ -140,6 +138,13 @@ function check(name, ok, detail) {
   check("durée alignée sur le temps réel (±150 ms)", delta < 0.15,
     `${wav.duration.toFixed(3)} s vs ${expected.toFixed(3)} s attendu (écart ${(delta * 1000).toFixed(0)} ms)`);
 
+  // 3 bis. l'application doit annoncer le niveau capté, et ne pas marquer
+  // cette prise comme silencieuse (le faux micro émet un bip).
+  const recStatus = await page.textContent("#statusMessage");
+  const subtitle = await page.textContent(".track-subtitle");
+  check("niveau capté annoncé après la prise", /niveau max \d+ %/.test(recStatus), recStatus);
+  check("prise non marquée silencieuse", !/SILENCIEUSE/.test(subtitle) && !/SILENCIEUSE/.test(recStatus), subtitle);
+
   // 4. export du mix
   const dl = await Promise.all([
     page.waitForEvent("download", { timeout: 20000 }),
@@ -155,6 +160,15 @@ function check(name, ok, detail) {
   // 5. mute général : ne doit PAS rendre l'export muet (régression de la V0.2)
   await page.click("#muteAllBtn");
   await page.waitForTimeout(300);
+  const hint = await page.textContent("#mixHint");
+  check("avertissement de mute général affiché", /muettes/i.test(hint), hint);
+
+  await page.click("#playBtn");
+  await page.waitForTimeout(500);
+  const playStatus = await page.textContent("#statusMessage");
+  check("la lecture prévient qu'elle sera muette", /MUETTES/.test(playStatus), playStatus);
+  await page.click("#playBtn");
+  await page.waitForTimeout(400);
   const dl2 = await Promise.all([
     page.waitForEvent("download", { timeout: 20000 }),
     page.click("#exportBtn"),

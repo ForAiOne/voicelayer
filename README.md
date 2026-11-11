@@ -4,6 +4,19 @@ Application web locale (HTML/CSS/JS, sans build) pour enregistrer plusieurs pris
 vocales superposées, les écouter ensemble, les mixer et exporter un WAV à importer
 dans Suno. Cible finale : Android en PWA. Pour l'instant : ton PC Windows + Chrome.
 
+## Version en ligne (recommandée sur PC et Android)
+
+**https://foraione.github.io/voicelayer/**
+
+Une adresse HTTPS unique : pas de Live Server, pas de port, pas de risque d'ouvrir
+le mauvais dossier. Le micro et l'AudioWorklet y fonctionnent, y compris depuis un
+téléphone Android. Attention : le stockage (IndexedDB) est lié à l'adresse, donc
+`https://foraione.github.io/voicelayer/` et `http://127.0.0.1:5500/` sont **deux
+projets séparés** — ne mélange pas les deux.
+
+> **Ne jamais ouvrir `index.html` par double-clic** (`file://`) : Chrome y refuse le
+> micro et l'AudioWorklet. Il faut une adresse http(s) : l'URL GitHub, ou Live Server.
+
 ## Lancer
 
 1. Ouvrir le dossier dans VS Code.
@@ -86,14 +99,18 @@ Les prises vivent dans IndexedDB, donc dans **ce navigateur, sur cet appareil**.
 
 ## Vérifications automatiques
 
-Le dossier `../test/` contient deux scripts Playwright qui pilotent un vrai Chrome
-avec un faux microphone :
+Le dossier `tests/` contient trois scripts Playwright qui pilotent un vrai Chrome
+avec un faux microphone (`npm install`, puis `python3 -m http.server 8099` dans le
+dossier de l'app, puis `node tests/e2e.js`) :
 
-- `e2e.js` — 17 contrôles : démarrage du moteur, jauge micro, annulation du décompte,
-  prise réelle, **alignement de la durée**, export stéréo 16 bits, mute général sans
-  effet sur l'export, mute de piste respecté, recalage +10 ms, sauvegarde JSON.
+- `e2e.js` — 21 contrôles : démarrage du moteur, jauge micro, annulation du décompte,
+  prise réelle, **alignement de la durée**, niveau capté, export stéréo 16 bits, mute
+  général sans effet sur l'export, avertissement de mute, mute de piste respecté,
+  recalage +10 ms, sauvegarde JSON.
 - `migration.js` — 7 contrôles : une piste WebM de la V0.2 déposée en base est bien
   convertie en WAV au chargement, sans perte, et reste audible dans l'export.
+- `silence.js` — 5 contrôles : une piste sans signal est mesurée, marquée
+  **⚠ SILENCIEUSE** et signalée visuellement.
 
 ## Fichiers
 
