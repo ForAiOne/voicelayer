@@ -298,18 +298,27 @@ function applyMonitorGain() {
 }
 
 function updateMonitorUi() {
-  ui.monitorBtn.textContent = monitoring ? "🎧 Retour casque activé" : "🎧 M'entendre en direct";
+  ui.monitorBtn.textContent = monitoring ? "🎧 Retour casque activé — couper" : "🎧 Activer le retour casque";
   ui.monitorBtn.setAttribute("aria-pressed", String(monitoring));
   ui.monitorVolume.parentElement.hidden = !monitoring;
   ui.monitorHint.textContent = monitoring
     ? "Actif pendant le test et les prises. Le micro se ferme entre deux : le retour s'arrête aussi."
-    : "Casque obligatoire : avec des enceintes, larsen immédiat.";
+    : "Désactivé par défaut. Casque ou écouteurs obligatoires : avec des enceintes, larsen immédiat.";
+}
+
+function isTouchDevice() {
+  return !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
 }
 
 async function toggleMonitoring() {
   try {
     if (!monitoring) {
-      const ok = confirm("Mets un casque avant d'activer.\n\nSans casque, le micro reprend le son des haut-parleurs et produit un larsen immédiat.\n\nActiver le retour casque ?");
+      // Sur téléphone, le haut-parleur est à quelques centimètres du micro :
+      // le larsen est immédiat. Le message s'adapte au matériel.
+      const message = isTouchDevice()
+        ? "Écouteurs ou casque obligatoires.\n\nSur un téléphone, activer le retour avec le haut-parleur produit un larsen immédiat.\n\nActiver le retour dans les écouteurs ?"
+        : "Mets un casque avant d'activer.\n\nSans casque, le micro reprend le son des haut-parleurs et produit un larsen immédiat.\n\nActiver le retour casque ?";
+      const ok = confirm(message);
       if (!ok) return;
 
       await ensureCtx();

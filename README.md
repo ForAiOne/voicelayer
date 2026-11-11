@@ -61,9 +61,11 @@ autre : tu peux chanter dessus, la mettre en mute, etc.
 
 ## Retour casque (s'entendre en direct)
 
-Bouton **🎧 M'entendre en direct** dans le panneau Microphone. Le micro est renvoyé
-vers la sortie audio, branché **en parallèle** du chemin d'enregistrement : ce que tu
-entends ne change donc rien à ce qui est capté.
+Bouton **🎧 Activer le retour casque** dans le panneau Microphone — jamais actif au
+départ, et jamais mémorisé. Le micro est renvoyé vers la sortie audio, branché **en
+parallèle** du chemin d'enregistrement : ce que tu entends ne change donc rien à ce qui
+est capté. Sur téléphone, le message d'avertissement parle d'écouteurs : en haut-parleur,
+le larsen est immédiat.
 
 - **Casque obligatoire.** Avec des enceintes, le micro reprend le son des haut-parleurs
   et produit un larsen immédiat — une confirmation le rappelle avant d'activer.

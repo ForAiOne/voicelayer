@@ -73,6 +73,18 @@ function check(name, ok, detail) {
   const sr = await page.evaluate(() => Number(document.getElementById("enginePill").textContent.match(/(\d+) Hz/)[1]));
   check("fréquence d'échantillonnage connue", sr >= 8000, sr + " Hz");
 
+  // 1 bis. retour casque : un bouton explicite, jamais actif au départ
+  const defMon = await page.evaluate(() => ({
+    monitoring,
+    label: document.getElementById("monitorBtn").textContent,
+    pressed: document.getElementById("monitorBtn").getAttribute("aria-pressed"),
+    volumeHidden: document.getElementById("monitorVolume").parentElement.hidden,
+  }));
+  check("retour casque désactivé par défaut",
+    defMon.monitoring === false && defMon.pressed === "false" && defMon.volumeHidden === true,
+    JSON.stringify(defMon));
+  check("le bouton annonce clairement l'activation", /Activer le retour casque/.test(defMon.label), defMon.label);
+
   // 2. jauge du micro — le faux périphérique de Chrome émet un bip périodique,
   // donc on échantillonne plusieurs secondes et on garde le maximum observé.
   await page.click("#testMicBtn");
@@ -281,6 +293,21 @@ function check(name, ok, detail) {
   const saved = JSON.parse(fs.readFileSync(jsonPath, "utf8"));
   check("sauvegarde projet JSON", saved.app === "voicelayer" && saved.tracks.length === 1 && saved.tracks[0].wav.length > 100,
     `${saved.tracks.length} piste(s), ${(fs.statSync(jsonPath).size / 1024).toFixed(0)} Ko`);
+
+  // 9. le retour casque ne doit JAMAIS être mémorisé : sur téléphone, un retour
+  // resté actif au rechargement produirait un larsen dès l'ouverture.
+  await page.reload({ waitUntil: "load" });
+  await page.waitForFunction(() => /Hz/.test(document.getElementById("enginePill").textContent), null, { timeout: 20000 });
+  await page.waitForTimeout(500);
+  const afterReload = await page.evaluate(() => ({
+    monitoring,
+    gain: monitorGain ? monitorGain.gain.value : null,
+    pressed: document.getElementById("monitorBtn").getAttribute("aria-pressed"),
+    stored: Object.keys(localStorage).filter((k) => /monitor|casque/i.test(k)),
+  }));
+  check("retour casque toujours coupé après rechargement",
+    afterReload.monitoring === false && afterReload.pressed === "false" && (afterReload.gain === null || afterReload.gain === 0) && afterReload.stored.length === 0,
+    JSON.stringify(afterReload));
 
   check("aucune erreur JavaScript", errors.length === 0, errors.slice(0, 3).join(" | ") || "aucune");
 
