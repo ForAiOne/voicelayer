@@ -4,6 +4,7 @@
 
 const { chromium } = require("playwright-core");
 const path = require("path");
+const { ensureTone } = require("./tone");
 
 const CHROME = process.env.CHROME || undefined;
 const APP_URL = process.env.APP_URL || "http://127.0.0.1:8099/index.html";
@@ -18,7 +19,8 @@ function check(name, ok, detail) {
   const browser = await chromium.launch({
     executablePath: CHROME,
     headless: true,
-    args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream", "--autoplay-policy=no-user-gesture-required", "--no-sandbox"],
+    args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream",
+      `--use-file-for-fake-audio-capture=${ensureTone()}`, "--autoplay-policy=no-user-gesture-required", "--no-sandbox"],
   });
   const page = await browser.newPage();
   const errors = [];

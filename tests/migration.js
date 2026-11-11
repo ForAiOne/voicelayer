@@ -5,10 +5,10 @@
 const { chromium } = require("playwright-core");
 const fs = require("fs");
 const path = require("path");
+const { ensureTone } = require("./tone");
 
-const CHROME = process.env.CHROME || undefined;
-const APP_URL = process.env.APP_URL || "http://127.0.0.1:8099/index.html";
-const OUT = path.join(__dirname, "out");
+const CHROME = "/root/.cache/ms-playwright/chromium-1223/chrome-linux64/chrome";
+const OUT = "/root/projets/voicelayer/test/out";
 
 const results = [];
 function check(name, ok, detail) {
@@ -21,14 +21,15 @@ function check(name, ok, detail) {
   const browser = await chromium.launch({
     executablePath: CHROME,
     headless: true,
-    args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream", "--autoplay-policy=no-user-gesture-required", "--no-sandbox"],
+    args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream",
+      `--use-file-for-fake-audio-capture=${ensureTone()}`, "--autoplay-policy=no-user-gesture-required", "--no-sandbox"],
   });
   const context = await browser.newContext({ acceptDownloads: true });
   const page = await context.newPage();
   const errors = [];
   page.on("pageerror", (e) => errors.push("PAGEERROR " + e.message));
 
-  await page.goto(APP_URL);
+  await page.goto("http://127.0.0.1:8099/index.html");
   await page.waitForFunction(() => /Hz/.test(document.getElementById("enginePill").textContent), null, { timeout: 20000 });
 
   // 1. Fabriquer une piste « ancienne version » : un vrai Blob WebM/Opus dans IndexedDB.

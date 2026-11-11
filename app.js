@@ -40,7 +40,8 @@ const ui = {
 
 let ctx = null;
 let micStream = null, micSource = null, analyser = null, meterFrame = null, meterData = null;
-let meterFloat = null, maxMicPeak = 0, recPeak = 0, maxRecPeak = 0;
+let meterFloat = null, maxMicPeak = 0, recPeak = 0, maxRecPeak = 0, micArmedDevice = null;
+let fallbackRecorder = null, fallbackChunks = [];
 let recorderNode = null, silentGain = null, pendingCapture = null;
 let testActive = false;
 
@@ -246,14 +247,13 @@ async function initRecorder() {
   recorderNode = new AudioWorkletNode(ctx, "pcm-recorder", {
     numberOfInputs: 1,
     numberOfOutputs: 1,
-    outputChannelCount: [1],
   });
 
-  // Un noeud sans sortie connectée n'est pas tiré par le graphe audio :
-  // on le branche sur un gain nul pour garantir l'appel de process().
-  silentGain = ctx.createGain();
-  silentGain.gain.value = 0;
-  recorderNode.connect(silentGain).connect(ctx.destination);
+  // Le processeur n'écrit jamais dans sa sortie : la branche est donc
+  // silencieuse par construction. On la branche DIRECTEMENT sur la destination
+  // (et non via un gain nul) pour que le graphe la tire à coup sûr — un noeud
+  // dont la sortie n'aboutit pas à la destination peut ne jamais être traité.
+  recorderNode.connect(ctx.destination);
 
   recorderNode.port.onmessage = (event) => {
     const data = event.data || {};
@@ -318,6 +318,15 @@ function micConstraints() {
 }
 
 async function armMic() {
+  const wanted = ui.micSelect.value || "";
+
+  // On garde le flux déjà ouvert s'il correspond au micro demandé. Fermer puis
+  // réouvrir le périphérique donne parfois, sous Windows, un flux qui ne délivre
+  // que des zéros : c'est exactement ce que produisait un aller-retour test/prise.
+  if (micStream && micArmedDevice === wanted && micStream.getAudioTracks().some((t) => t.readyState === "live")) {
+    return micStream;
+  }
+
   if (micStream) {
     micStream.getTracks().forEach((t) => t.stop());
     micStream = null;
@@ -325,6 +334,7 @@ async function armMic() {
   if (micSource) { try { micSource.disconnect(); } catch { } micSource = null; }
 
   micStream = await navigator.mediaDevices.getUserMedia(micConstraints());
+  micArmedDevice = wanted;
   localStorage.setItem(MIC_PREF_KEY, ui.micSelect.value || "");
 
   micSource = ctx.createMediaStreamSource(micStream);
@@ -392,6 +402,54 @@ function releaseMic() {
   analyser = null;
   if (micStream) micStream.getTracks().forEach((t) => t.stop());
   micStream = null;
+  micArmedDevice = null;
+}
+
+/* Chemin de secours : un MediaRecorder en parallèle de la capture PCM.
+   Si la capture PCM revient vide alors que le micro émettait, on récupère la
+   prise par ce chemin plutôt que de perdre la voix de l'utilisateur. */
+function startFallback() {
+  fallbackChunks = [];
+  fallbackRecorder = null;
+  if (!window.MediaRecorder || !micStream) return;
+  try {
+    const mime = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"]
+      .find((t) => MediaRecorder.isTypeSupported(t));
+    fallbackRecorder = new MediaRecorder(micStream, mime ? { mimeType: mime } : undefined);
+    fallbackRecorder.ondataavailable = (e) => { if (e.data && e.data.size) fallbackChunks.push(e.data); };
+    fallbackRecorder.start(200);
+  } catch {
+    fallbackRecorder = null;
+  }
+}
+
+async function stopFallback() {
+  const rec = fallbackRecorder;
+  fallbackRecorder = null;
+  if (!rec || rec.state === "inactive") return;
+  await new Promise((resolve) => {
+    rec.onstop = resolve;
+    try { rec.stop(); } catch { resolve(); }
+  });
+}
+
+async function fallbackToPcm() {
+  if (!fallbackChunks.length) return null;
+  const blob = new Blob(fallbackChunks, { type: fallbackChunks[0].type || "audio/webm" });
+  if (blob.size < 1000) return null;
+  const decoded = await ctx.decodeAudioData(await blob.arrayBuffer());
+  const offline = new OfflineAudioContext(1, Math.max(1, Math.ceil(decoded.duration * ctx.sampleRate)), ctx.sampleRate);
+  const source = offline.createBufferSource();
+  source.buffer = decoded;
+  source.connect(offline.destination);
+  source.start(0);
+  const rendered = await offline.startRendering();
+  const pcm = floatToInt16(rendered.getChannelData(0));
+  // Le MediaRecorder démarre de façon asynchrone : on retire la marge de
+  // pré-roll, ce qui laisse une incertitude de quelques dizaines de ms —
+  // rattrapable avec les boutons de recalage 10 ms.
+  const trim = Math.min(pcm.length, Math.round(PREROLL * ctx.sampleRate));
+  return pcm.slice(trim);
 }
 
 async function toggleMicTest() {
@@ -574,9 +632,9 @@ async function startRecording() {
     state = "countdown";
     setTransportLocked(true);
     stopPlayback();
-    stopMeter();
+    startMeter();               // le micro est mesuré pendant le décompte
     ui.timer.textContent = "03";
-    setStatus("Prépare-toi… démarrage dans 3 secondes.");
+    setStatus("Prépare-toi… démarrage dans 3 secondes. Parle : la jauge doit bouger.");
 
     let count = 3;
     countdownInterval = setInterval(async () => {
@@ -584,6 +642,19 @@ async function startRecording() {
       if (count > 0) { ui.timer.textContent = `0${count}`; return; }
       clearInterval(countdownInterval);
       countdownInterval = null;
+
+      // Garde-fou : ne pas gaspiller une prise entière si le micro est muet.
+      if (maxMicPeak < SILENT_PEAK) {
+        state = "idle";
+        releaseMic();
+        setTransportLocked(false);
+        ui.timer.textContent = "00:00";
+        ui.micState.textContent = "Micro muet";
+        ui.micState.className = "mic-state error";
+        setStatus("Prise annulée avant de commencer : le micro n'a envoyé aucun son pendant le décompte (niveau micro 0 %). Rien n'a été enregistré. Vérifie le périphérique affiché au-dessus, puis le niveau d'entrée dans Windows.");
+        return;
+      }
+
       await launchTake(backing);
     }, 1000);
   } catch (error) {
@@ -612,16 +683,17 @@ async function launchTake(backing) {
   const startAt = ctx.currentTime + PREROLL;
   captureStartAt = startAt;
   captureFirstTime = -1;
+  maxMicPeak = 0;
   recPeak = 0;
   maxRecPeak = 0;
 
   pendingCapture = null;
   recorderNode.port.postMessage({ cmd: "start" });
+  startFallback();
 
   if (backing.length) await scheduleTracks(backing, startAt);
 
   state = "recording";
-  startMeter();
   ui.micState.textContent = "Enregistrement";
   ui.micState.className = "mic-state active";
   setStatus(backing.length
@@ -655,6 +727,8 @@ async function stopRecording() {
     recorderNode.port.postMessage({ cmd: "stop" });
   });
 
+  await stopFallback();
+
   await finalizeTake(done);
 }
 
@@ -664,7 +738,6 @@ async function finalizeTake(data) {
   try {
     let total = 0;
     for (const chunk of data.chunks || []) total += chunk.byteLength / 2;
-    if (!total) throw new Error("aucun échantillon capturé");
 
     const all = new Int16Array(total);
     let offset = 0;
@@ -683,16 +756,36 @@ async function finalizeTake(data) {
     const drop = Math.max(0, softwareDrop + calibrationDrop);
 
     const kept = all.length > drop ? all.slice(drop) : new Int16Array(0);
-    const duration = kept.length / sampleRate;
 
-    if (duration < MIN_TAKE) throw new Error("prise trop courte, rien n'a été conservé");
+    let pcm = kept;
+    let peak = peakOf(kept);
+    let usedFallback = false;
 
-    const peak = peakOf(kept);
+    // Filet de sécurité : la capture PCM est vide alors que le micro émettait.
+    // On récupère la prise par le MediaRecorder lancé en parallèle.
+    if (peak < SILENT_PEAK && fallbackChunks.length) {
+      try {
+        const rescued = await fallbackToPcm();
+        if (rescued && rescued.length > sampleRate * MIN_TAKE && peakOf(rescued) >= SILENT_PEAK) {
+          pcm = rescued;
+          peak = peakOf(rescued);
+          usedFallback = true;
+        }
+      } catch {
+        /* on garde la prise PCM vide, rien n'est perdu */
+      }
+    }
+
+    const duration = pcm.length / sampleRate;
+
+    if (duration < MIN_TAKE) throw new Error(total
+      ? "prise trop courte, rien n'a été conservé"
+      : "l'enregistreur n'a reçu aucun échantillon");
 
     const track = {
       id: crypto.randomUUID(),
       name: `Piste ${tracks.length + 1}`,
-      blob: wavFromInt16(kept, sampleRate, 1),
+      blob: wavFromInt16(pcm, sampleRate, 1),
       sampleRate,
       duration,
       peak,
@@ -707,7 +800,11 @@ async function finalizeTake(data) {
 
     ui.timer.textContent = fmt(duration);
 
-    if (peak < SILENT_PEAK) {
+    if (usedFallback) {
+      ui.micState.textContent = "Mode secours";
+      ui.micState.className = "mic-state";
+      setStatus(`La capture PCM est revenue vide, mais la prise a été récupérée par le chemin de secours : ${fmt(duration)}, niveau max ${Math.round(peak * 100)} %. L'alignement peut être décalé de quelques dizaines de ms : recale avec les boutons 10 ms. Signale-moi ce cas, c'est un défaut à corriger.`);
+    } else if (peak < SILENT_PEAK) {
       ui.micState.textContent = "Micro muet ?";
       ui.micState.className = "mic-state error";
 

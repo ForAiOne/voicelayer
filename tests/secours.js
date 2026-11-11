@@ -1,0 +1,132 @@
+/* Vérifie les deux garde-fous ajoutés après la prise silencieuse de 11 s :
+   1. le décompte annule la prise si le micro n'envoie rien ;
+   2. si la capture PCM revient vide alors que le micro émettait, la prise est
+      récupérée par le MediaRecorder parallèle (chemin de secours).
+
+   Le cas 2 est provoqué en vidant les blocs renvoyés par l'AudioWorklet, ce qui
+   reproduit exactement ce que l'utilisateur a vécu, sans toucher au matériel. */
+
+const { chromium } = require("playwright-core");
+const path = require("path");
+const { ensureTone } = require("./tone");
+
+const CHROME = process.env.CHROME || undefined;
+const APP_URL = process.env.APP_URL || "http://127.0.0.1:8099/index.html";
+
+const results = [];
+function check(name, ok, detail) {
+  results.push({ name, ok: !!ok, detail });
+  console.log(`${ok ? "OK  " : "FAIL"} ${name}${detail ? " — " + detail : ""}`);
+}
+
+async function launch(browser, silent) {
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  return page;
+}
+
+(async () => {
+  const toneFile = ensureTone();
+
+  // fichier silencieux pour simuler un micro muet
+  const fs = require("fs");
+  const silentFile = path.join(__dirname, "out", "micro-muet.wav");
+  if (!fs.existsSync(silentFile)) {
+    fs.mkdirSync(path.dirname(silentFile), { recursive: true });
+    const frames = 48000 * 3, ch = 2;
+    const buf = Buffer.alloc(44 + frames * ch * 2);
+    buf.write("RIFF", 0); buf.writeUInt32LE(36 + frames * ch * 2, 4); buf.write("WAVE", 8);
+    buf.write("fmt ", 12); buf.writeUInt32LE(16, 16); buf.writeUInt16LE(1, 20);
+    buf.writeUInt16LE(ch, 22); buf.writeUInt32LE(48000, 24); buf.writeUInt32LE(48000 * ch * 2, 28);
+    buf.writeUInt16LE(ch * 2, 32); buf.writeUInt16LE(16, 34);
+    buf.write("data", 36); buf.writeUInt32LE(frames * ch * 2, 40);
+    fs.writeFileSync(silentFile, buf);
+  }
+
+  // ---------- Cas 1 : micro muet -> la prise est annulée avant d'enregistrer
+  {
+    const browser = await chromium.launch({
+      executablePath: CHROME,
+      headless: true,
+      args: [
+        "--use-fake-device-for-media-stream",
+        "--use-fake-ui-for-media-stream",
+        `--use-file-for-fake-audio-capture=${silentFile}`,
+        "--autoplay-policy=no-user-gesture-required",
+        "--no-sandbox",
+      ],
+    });
+
+    const page = await browser.newPage();
+    await page.goto(APP_URL);
+    await page.waitForFunction(() => /Hz/.test(document.getElementById("enginePill").textContent), null, { timeout: 20000 });
+
+    await page.click("#recordBtn");
+    await page.waitForTimeout(4200); // au-delà du décompte
+    const state = await page.evaluate(() => ({
+      status: document.getElementById("statusMessage").textContent,
+      cards: document.querySelectorAll(".track-card").length,
+      micState: document.getElementById("micState").textContent,
+      recordDisabled: document.getElementById("recordBtn").disabled,
+    }));
+    check("micro muet : la prise est annulée pendant le décompte",
+      state.cards === 0 && /annulée/i.test(state.status) && !state.recordDisabled,
+      `${state.cards} piste(s) · ${state.status.slice(0, 80)}`);
+    await browser.close();
+  }
+
+  // ---------- Cas 2 : capture PCM vide -> récupération par le chemin de secours
+  {
+    const browser = await chromium.launch({
+      executablePath: CHROME,
+      headless: true,
+      args: [
+        "--use-fake-device-for-media-stream",
+        "--use-fake-ui-for-media-stream",
+        `--use-file-for-fake-audio-capture=${toneFile}`,
+        "--autoplay-policy=no-user-gesture-required",
+        "--no-sandbox",
+      ],
+    });
+    const page = await browser.newPage();
+    const errors = [];
+    page.on("pageerror", (e) => errors.push("PAGEERROR " + e.message));
+    await page.goto(APP_URL);
+    await page.waitForFunction(() => /Hz/.test(document.getElementById("enginePill").textContent), null, { timeout: 20000 });
+
+    // On vide les blocs PCM renvoyés par l'AudioWorklet : le micro émet, la jauge
+    // monte, mais l'enregistreur PCM ne reçoit rien — le cas vécu.
+    await page.evaluate(() => {
+      const original = recorderNode.port.onmessage;
+      recorderNode.port.onmessage = (event) => {
+        const data = event.data || {};
+        if (data.type === "done") { original({ data: { ...data, chunks: [] } }); return; }
+        original(event);
+      };
+    });
+
+    await page.click("#recordBtn");
+    await page.waitForFunction(() => document.getElementById("micState").textContent === "Enregistrement", null, { timeout: 10000 });
+    await page.waitForTimeout(2500);
+    await page.click("#stopBtn");
+    await page.waitForSelector(".track-card", { timeout: 20000 });
+    await page.waitForTimeout(800);
+
+    const after = await page.evaluate(() => ({
+      status: document.getElementById("statusMessage").textContent,
+      peak: tracks[0] && tracks[0].peak,
+      duration: tracks[0] && tracks[0].duration,
+      subtitle: document.querySelector(".track-subtitle").textContent,
+    }));
+
+    check("capture PCM vide : la prise est récupérée", /chemin de secours/i.test(after.status), after.status.slice(0, 110));
+    check("la prise récupérée contient du son", after.peak > 0.05, `crête ${after.peak}`);
+    check("durée plausible", after.duration > 1.2 && after.duration < 3.5, `${after.duration && after.duration.toFixed(2)} s`);
+    check("aucune erreur JavaScript", errors.length === 0, errors.join(" | ") || "aucune");
+    await browser.close();
+  }
+
+  const failed = results.filter((r) => !r.ok);
+  console.log(`\n${results.length - failed.length}/${results.length} contrôles passés`);
+  process.exit(failed.length ? 1 : 0);
+})().catch((e) => { console.error("ERREUR DU TEST :", e.message); process.exit(2); });

@@ -113,7 +113,7 @@ Le dossier `tests/` contient trois scripts Playwright qui pilotent un vrai Chrom
 avec un faux microphone (`npm install`, puis `python3 -m http.server 8099` dans le
 dossier de l'app, puis `node tests/e2e.js`) :
 
-- `e2e.js` — 24 contrôles : démarrage du moteur, jauge micro, annulation du décompte,
+- `e2e.js` — 21 contrôles : démarrage du moteur, jauge micro, annulation du décompte,
   prise réelle, **alignement de la durée**, niveau capté, export stéréo 16 bits, mute
   général sans effet sur l'export, avertissement de mute, mute de piste respecté,
   recalage +10 ms, sauvegarde JSON.
