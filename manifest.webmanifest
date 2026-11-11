@@ -1,0 +1,19 @@
+{
+  "name": "VoiceLayer — studio vocal multipiste",
+  "short_name": "VoiceLayer",
+  "description": "Mini studio vocal multipiste : prises superposées, mute, export WAV.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0b1020",
+  "theme_color": "#111827",
+  "lang": "fr",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
