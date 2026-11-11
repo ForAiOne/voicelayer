@@ -67,6 +67,16 @@ même — rien n'est perdu — mais elle porte la mention **⚠ SILENCIEUSE** et
 passe en rouge. C'est ce qui distingue « le micro n'a rien pris » de « le son ne
 sort pas » : dans le second cas, la piste affiche un niveau normal.
 
+Pendant la prise, deux niveaux sont affichés sous la jauge :
+
+- **niveau micro (max)** : ce que le navigateur reçoit du périphérique ;
+- **niveau enregistré (max)** : ce que l'enregistreur PCM reçoit réellement.
+
+Si le premier monte et que le second reste à 0 %, c'est l'application qui est en
+cause, pas le matériel — et le message de fin de prise le dit explicitement. La ligne
+**Micro réellement ouvert** indique le nom exact du périphérique utilisé, ce qui
+repère immédiatement une mauvaise sélection.
+
 ## Le décalage : ce qui reste à régler
 
 Le logiciel ne décale plus rien : la prise est calée en échantillons sur le départ de
@@ -103,7 +113,7 @@ Le dossier `tests/` contient trois scripts Playwright qui pilotent un vrai Chrom
 avec un faux microphone (`npm install`, puis `python3 -m http.server 8099` dans le
 dossier de l'app, puis `node tests/e2e.js`) :
 
-- `e2e.js` — 21 contrôles : démarrage du moteur, jauge micro, annulation du décompte,
+- `e2e.js` — 24 contrôles : démarrage du moteur, jauge micro, annulation du décompte,
   prise réelle, **alignement de la durée**, niveau capté, export stéréo 16 bits, mute
   général sans effet sur l'export, avertissement de mute, mute de piste respecté,
   recalage +10 ms, sauvegarde JSON.

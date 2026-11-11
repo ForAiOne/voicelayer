@@ -22,6 +22,9 @@ class PcmRecorder extends AudioWorkletProcessor {
     this.buffer = new Int16Array(this.chunkSize);
     this.pos = 0;
     this.chunks = [];
+    this.levelPeak = 0;
+    this.levelCount = 0;
+    this.levelWindow = Math.max(256, Math.round(sampleRate / 8));
 
     this.port.onmessage = (event) => {
       const data = event.data || {};
@@ -29,6 +32,8 @@ class PcmRecorder extends AudioWorkletProcessor {
         this.chunks = [];
         this.pos = 0;
         this.firstTime = -1;
+        this.levelPeak = 0;
+        this.levelCount = 0;
         this.state = "recording";
       } else if (data.cmd === "stop") {
         this.flush();
@@ -63,9 +68,22 @@ class PcmRecorder extends AudioWorkletProcessor {
     const size = this.chunkSize;
 
     for (let i = 0; i < channel.length; i++) {
-      const s = channel[i] < -1 ? -1 : channel[i] > 1 ? 1 : channel[i];
+      const raw = channel[i];
+      const s = raw < -1 ? -1 : raw > 1 ? 1 : raw;
+      const a = s < 0 ? -s : s;
+      if (a > this.levelPeak) this.levelPeak = a;
       buf[this.pos++] = s < 0 ? s * 0x8000 : s * 0x7fff;
       if (this.pos >= size) this.flush();
+    }
+
+    // Niveau réellement reçu par l'enregistreur, remonté ~8 fois par seconde.
+    // Comparé au niveau du micro côté page, il distingue « micro muet » de
+    // « enregistreur qui ne reçoit rien ».
+    this.levelCount += channel.length;
+    if (this.levelCount >= this.levelWindow) {
+      this.port.postMessage({ type: "level", peak: this.levelPeak });
+      this.levelPeak = 0;
+      this.levelCount = 0;
     }
 
     return true;

@@ -33,12 +33,14 @@ const ui = {
   importInput: $("importInput"), projectInput: $("projectInput"),
   micSelect: $("micSelect"), refreshMics: $("refreshMicsBtn"), testMic: $("testMicBtn"),
   micTestText: $("micTestText"), micState: $("micState"), meter: $("meterFill"), offset: $("offsetMs"),
+  micInfo: $("micInfo"), levelReadout: $("levelReadout"),
   record: $("recordBtn"), stop: $("stopBtn"), play: $("playBtn"), timer: $("timer"), status: $("statusMessage"),
   list: $("tracks"), count: $("trackCount"), export: $("exportBtn"), muteAll: $("muteAllBtn"), mixHint: $("mixHint"),
 };
 
 let ctx = null;
 let micStream = null, micSource = null, analyser = null, meterFrame = null, meterData = null;
+let meterFloat = null, maxMicPeak = 0, recPeak = 0, maxRecPeak = 0;
 let recorderNode = null, silentGain = null, pendingCapture = null;
 let testActive = false;
 
@@ -255,6 +257,11 @@ async function initRecorder() {
 
   recorderNode.port.onmessage = (event) => {
     const data = event.data || {};
+    if (data.type === "level") {
+      recPeak = data.peak;
+      if (data.peak > maxRecPeak) maxRecPeak = data.peak;
+      return;
+    }
     if (data.type === "done" && pendingCapture) {
       const pending = pendingCapture;
       pendingCapture = null;
@@ -327,21 +334,43 @@ async function armMic() {
   analyser.fftSize = 1024;
   micSource.connect(analyser);
   meterData = new Uint8Array(analyser.fftSize);
+  meterFloat = new Float32Array(analyser.fftSize);
+
+  const track = micStream.getAudioTracks()[0];
+  const settings = track && track.getSettings ? track.getSettings() : {};
+  ui.micInfo.textContent = track
+    ? `Micro réellement ouvert : « ${track.label || "sans nom"} » · ${settings.sampleRate || "?"} Hz · ${settings.channelCount || "?"} canal(aux)`
+    : "";
 
   return micStream;
 }
 
+function updateLevelReadout() {
+  if (!ui.levelReadout) return;
+  const mic = `${Math.round(maxMicPeak * 100)} %`;
+  const rec = state === "recording" ? `${Math.round(maxRecPeak * 100)} %` : "—";
+  // On affiche les MAXIMUMS depuis le début de la prise, pas l'instant présent :
+  // un pic instantané peut tomber dans un creux et faire croire à du silence.
+  ui.levelReadout.textContent = `niveau micro (max) ${mic} · niveau enregistré (max) ${rec}`;
+  ui.levelReadout.classList.toggle("hint-alert", state === "recording" && maxMicPeak > SILENT_PEAK && maxRecPeak < SILENT_PEAK);
+}
+
 function startMeter() {
+  maxMicPeak = 0;
   const draw = () => {
     if (!analyser) return;
-    analyser.getByteTimeDomainData(meterData);
-    let sum = 0;
-    for (let i = 0; i < meterData.length; i++) {
-      const x = (meterData[i] - 128) / 128;
-      sum += x * x;
+    analyser.getFloatTimeDomainData(meterFloat);
+    let sum = 0, peak = 0;
+    for (let i = 0; i < meterFloat.length; i++) {
+      const v = meterFloat[i];
+      const a = v < 0 ? -v : v;
+      if (a > peak) peak = a;
+      sum += v * v;
     }
-    const rms = Math.sqrt(sum / meterData.length);
+    const rms = Math.sqrt(sum / meterFloat.length);
+    if (peak > maxMicPeak) maxMicPeak = peak;
     ui.meter.style.width = `${Math.min(100, Math.max(0, rms * 450))}%`;
+    updateLevelReadout();
     meterFrame = requestAnimationFrame(draw);
   };
   draw();
@@ -351,6 +380,10 @@ function stopMeter() {
   if (meterFrame) cancelAnimationFrame(meterFrame);
   meterFrame = null;
   ui.meter.style.width = "0%";
+  if (ui.levelReadout) {
+    ui.levelReadout.textContent = "niveau micro — · niveau enregistré —";
+    ui.levelReadout.classList.remove("hint-alert");
+  }
 }
 
 function releaseMic() {
@@ -579,6 +612,8 @@ async function launchTake(backing) {
   const startAt = ctx.currentTime + PREROLL;
   captureStartAt = startAt;
   captureFirstTime = -1;
+  recPeak = 0;
+  maxRecPeak = 0;
 
   pendingCapture = null;
   recorderNode.port.postMessage({ cmd: "start" });
@@ -675,7 +710,15 @@ async function finalizeTake(data) {
     if (peak < SILENT_PEAK) {
       ui.micState.textContent = "Micro muet ?";
       ui.micState.className = "mic-state error";
-      setStatus(`Prise enregistrée mais SILENCIEUSE : le micro n'a capté aucun son sur ${fmt(duration)}. Vérifie le micro sélectionné, puis le niveau d'entrée dans Windows (Paramètres › Système › Son › Entrée). Clique ⤓ pour garder quand même le fichier.`);
+
+      // Deux causes très différentes, deux messages différents : le micro
+      // n'émet rien (matériel, périphérique, autorisation) ou il émet et
+      // c'est l'enregistreur qui ne reçoit rien (défaut de l'application).
+      if (maxMicPeak >= SILENT_PEAK) {
+        setStatus(`DÉFAUT DE L'APPLICATION, pas de ton matériel : le micro émettait du son (niveau micro ${Math.round(maxMicPeak * 100)} %) mais l'enregistreur a reçu ${Math.round(peak * 100)} %. Les ${fmt(duration)} de la prise sont vides. Signale-moi ce message tel quel.`);
+      } else {
+        setStatus(`Prise SILENCIEUSE : le micro n'envoie aucun son (niveau micro 0 % pendant ${fmt(duration)}). Côté matériel : vérifie le micro choisi dans « Micro réellement ouvert » ci-dessus, puis Paramètres Windows › Système › Son › Entrée (périphérique + niveau). La prise vide est conservée, ⤓ pour la supprimer après vérification.`);
+      }
     } else {
       ui.micState.textContent = "Prêt";
       ui.micState.className = "mic-state";

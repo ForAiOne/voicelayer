@@ -19,8 +19,8 @@ label{display:block;font-size:.8rem;color:#cbd5e1;margin:12px 0 8px}.project-row
 .status-message{min-height:2.4em;margin:14px 0 8px}.meter{height:7px;background:#25314a;border-radius:99px;overflow:hidden;margin-top:12px}.meter div{height:100%;width:0;background:#63d7a4;transition:width .06s}
 .mic-state{font-size:.72rem;color:#aab8d0;border:1px solid #34415e;padding:5px 9px;border-radius:99px}
 .mic-state.active{color:#7ee0b2;border-color:#36765e}.mic-state.error{color:#ffb4bd;border-color:#8c4350}
-.offset-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:6px}
-.offset-row label{margin:0}.offset-row input{width:86px;background:#0d1528;border:1px solid #34415e;border-radius:10px;color:white;padding:9px 10px;text-align:center}
+.level-readout{font-size:.72rem;color:#aab8d0;margin:7px 0 0;font-variant-numeric:tabular-nums}
+.offset-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:6px}.offset-row label{margin:0}.offset-row input{width:86px;background:#0d1528;border:1px solid #34415e;border-radius:10px;color:white;padding:9px 10px;text-align:center}
 .offset-row .hint{margin:0;flex:1 1 200px}
 .tracks-section{margin-top:25px}.tracks-list{display:grid;gap:10px;margin-top:14px}
 .mute-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:14px}

@@ -104,9 +104,21 @@ function check(name, ok, detail) {
   await page.click("#recordBtn");
   await page.waitForFunction(() => document.getElementById("micState").textContent === "Enregistrement", null, { timeout: 10000 });
   const recStart = Date.now();
-  await page.waitForTimeout(3000);
+  await page.waitForTimeout(1200);
+  const readout = await page.textContent("#levelReadout");
+  const micInfo = await page.textContent("#micInfo");
+  await page.waitForTimeout(1800);
   await page.click("#stopBtn");
   const wall = (Date.now() - recStart) / 1000;
+
+  // L'instrument doit montrer les deux niveaux : celui du micro et celui que
+  // l'enregistreur reçoit réellement. C'est ce qui sépare « micro muet » de
+  // « enregistreur qui ne reçoit rien ».
+  const micPct = Number((readout.match(/micro \(max\) (\d+) %/) || [])[1]);
+  const recPct = Number((readout.match(/enregistré \(max\) (\d+) %/) || [])[1]);
+  check("niveau du micro affiché pendant la prise", micPct > 0, readout);
+  check("niveau reçu par l'enregistreur affiché", recPct > 0, readout);
+  check("micro réellement ouvert nommé", /Micro réellement ouvert/.test(micInfo), micInfo || "(vide)");
 
   await page.waitForSelector(".track-card", { timeout: 15000 });
   check("une piste apparaît dans la liste", true, `temps réel ${wall.toFixed(2)} s`);
