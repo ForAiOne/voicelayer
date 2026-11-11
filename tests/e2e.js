@@ -607,6 +607,63 @@ function check(name, ok, detail) {
   check("silence avant le départ de la prise", beforeRms < 0.005, `rms avant ${beforeRms.toFixed(4)}`);
   check("la prise est audible à son départ dans le mix", duringRms > 0.02, `rms après ${duringRms.toFixed(4)}`);
 
+  // 11. ergonomie : tout doit tenir sur un écran de PC, sans défilement de page
+  await page.evaluate(async () => {
+    const sr = 44100;
+    const n = Math.round(sr * 0.8);
+    for (let k = 0; k < 6; k++) {
+      const s = new Int16Array(n);
+      for (let i = 0; i < n; i++) s[i] = Math.round(Math.sin((2 * Math.PI * (200 + k * 40) * i) / sr) * 10000);
+      const track = {
+        id: `remplissage-${k}`, name: `Remplissage ${k + 1}`, createdAt: Date.now() + k,
+        blob: wavFromInt16(s, sr, 1), sampleRate: sr, duration: 0.8, volume: 1, muted: false,
+        nudgeMs: 0, startMs: 0, peak: 0.3,
+      };
+      await storeItem("tracks", track);
+      tracks.push(track);
+    }
+    renderTracks();
+  });
+  await page.setViewportSize({ width: 1366, height: 768 });
+  await page.waitForTimeout(500);
+  const fit = await page.evaluate(() => {
+    const list = document.getElementById("tracks");
+    const col = document.querySelector(".col-controls");
+    return {
+      pageScroll: document.documentElement.scrollHeight,
+      viewport: window.innerHeight,
+      controlsFit: col.scrollHeight <= col.clientHeight + 1,
+      controlsScroll: col.scrollHeight,
+      controlsClient: col.clientHeight,
+      listOverflow: getComputedStyle(list).overflowY,
+      listScrolls: list.scrollHeight > list.clientHeight + 2,
+      listHeight: list.clientHeight,
+      listScrollHeight: list.scrollHeight,
+      cards: list.querySelectorAll(".track-card").length,
+      columns: getComputedStyle(document.querySelector(".workspace")).gridTemplateColumns,
+    };
+  });
+  check("aucun défilement de page sur un écran de PC", fit.pageScroll <= fit.viewport + 2,
+    `${fit.pageScroll} px de contenu pour ${fit.viewport} px d'écran`);
+  check("les réglages tiennent entiers dans la colonne de gauche", fit.controlsFit,
+    `${fit.controlsScroll} px de réglages pour ${fit.controlsClient} px de colonne`);
+  check("deux colonnes côte à côte", fit.columns.split(" ").length >= 2 && fit.columns.includes("px"),
+    fit.columns);
+  check("les pistes défilent dans leur colonne, pas la page",
+    fit.listOverflow === "auto" && fit.listScrolls, `overflow=${fit.listOverflow} · ${fit.cards} cartes · ${fit.listScrollHeight}/${fit.listHeight} px · défile=${fit.listScrolls}`);
+
+  // sur téléphone, les blocs s'empilent (le défilement de page redevient normal)
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForTimeout(400);
+  const mobile = await page.evaluate(() => ({
+    display: getComputedStyle(document.querySelector(".workspace")).display,
+    recordVisible: !!document.getElementById("recordBtn").offsetParent,
+    bodyOverflow: getComputedStyle(document.body).overflow,
+  }));
+  check("sur téléphone, les blocs s'empilent",
+    mobile.display === "block" && mobile.recordVisible && mobile.bodyOverflow !== "hidden",
+    JSON.stringify(mobile));
+
   check("aucune erreur JavaScript", errors.length === 0, errors.slice(0, 3).join(" | ") || "aucune");
 
   await browser.close();

@@ -13,87 +13,85 @@
 <body>
   <main class="app">
     <header class="topbar">
-      <div><p class="eyebrow">MINI STUDIO VOCAL</p><h1>VoiceLayer</h1></div>
+      <div class="brand"><p class="eyebrow">MINI STUDIO VOCAL</p><h1>VoiceLayer</h1></div>
+      <div class="project-strip">
+        <input id="projectName" value="Mon premier projet" maxlength="60" aria-label="Nom du projet">
+        <button id="importBtn" class="button button-quiet" type="button" title="Importer un audio (WAV, MP3, M4A, WebM) comme piste">Importer</button>
+        <button id="saveProjectBtn" class="button button-quiet" type="button" title="Enregistrer toutes les pistes dans un fichier, à ranger ailleurs que dans le navigateur">Sauvegarder</button>
+        <button id="loadProjectBtn" class="button button-quiet" type="button" title="Recharger un projet sauvegardé">Charger</button>
+        <button id="newProjectBtn" class="button button-quiet" type="button" title="Nouveau projet vide">Nouveau</button>
+        <input id="importInput" type="file" accept="audio/*" multiple hidden>
+        <input id="projectInput" type="file" accept=".json,application/json" hidden>
+      </div>
       <span class="pill" id="enginePill">Moteur PCM</span>
     </header>
 
-    <section class="panel project-panel">
-      <label for="projectName">Nom du projet</label>
-      <div class="project-row">
-        <input id="projectName" value="Mon premier projet" maxlength="60">
-        <button id="newProjectBtn" class="button button-quiet" type="button">Nouveau</button>
-      </div>
-      <div class="project-row project-row-wrap">
-        <button id="importBtn" class="button button-quiet" type="button">Importer un audio</button>
-        <button id="saveProjectBtn" class="button button-quiet" type="button">Sauvegarder le projet</button>
-        <button id="loadProjectBtn" class="button button-quiet" type="button">Charger un projet</button>
-      </div>
-      <p class="hint">Les prises sont conservées dans ce navigateur, sur cet appareil. <strong>Sauvegarder le projet</strong> enregistre toutes les pistes dans un fichier que tu peux ranger ailleurs.</p>
-      <input id="importInput" type="file" accept="audio/*" multiple hidden>
-      <input id="projectInput" type="file" accept=".json,application/json" hidden>
-    </section>
+    <div class="workspace">
+      <div class="col-controls">
+        <section class="panel transport-panel">
+          <div class="section-heading">
+            <div><p class="eyebrow">TRANSPORT</p><h2>Enregistrement</h2></div>
+            <span class="timer" id="timer">00:00</span>
+          </div>
+          <div class="transport-buttons">
+            <button id="recordBtn" class="button button-record" type="button"><span class="record-dot"></span> Enregistrer une piste</button>
+            <button id="stopBtn" class="button button-stop" type="button" disabled>Arrêter</button>
+            <button id="playBtn" class="button button-primary" type="button">▶ Tout écouter</button>
+            <button id="toStartBtn" class="button" type="button" title="Revenir au début du projet">⏮ Début</button>
+          </div>
+          <p class="position-readout" id="positionReadout">position 0:00 · durée 0:00</p>
+          <p class="status-message" id="statusMessage" role="status">Prêt. Choisis ton microphone puis teste-le avant la première prise.</p>
+        </section>
 
-    <section class="panel mic-panel">
-      <div class="section-heading">
-        <div><p class="eyebrow">ENTRÉE AUDIO</p><h2>Microphone</h2></div>
-        <span class="mic-state" id="micState">Non testé</span>
+        <section class="panel mic-panel">
+          <div class="section-heading">
+            <div><p class="eyebrow">ENTRÉE AUDIO</p><h2>Microphone</h2></div>
+            <span class="mic-state" id="micState">Non testé</span>
+          </div>
+          <div class="mic-row">
+            <select id="micSelect" aria-label="Choisir le microphone">
+              <option value="">Microphone par défaut du navigateur</option>
+            </select>
+            <button id="refreshMicsBtn" class="button button-quiet" type="button" title="Actualiser la liste">↻</button>
+          </div>
+          <div class="mic-test-row">
+            <button id="testMicBtn" class="button button-secondary" type="button">Tester le microphone</button>
+            <span id="micTestText" class="hint">Parle pour vérifier le niveau.</span>
+          </div>
+          <div class="meter" aria-label="Niveau du microphone"><div id="meterFill"></div></div>
+          <p class="level-readout" id="levelReadout">niveau micro — · niveau enregistré —</p>
+          <p class="hint" id="micInfo"></p>
+          <div class="monitor-row">
+            <button id="monitorBtn" class="button button-secondary" type="button" aria-pressed="false">🎧 Activer le retour casque</button>
+            <label class="monitor-volume" for="monitorVolume" hidden>Volume du retour
+              <input id="monitorVolume" type="range" min="0" max="1.5" step="0.01" value="1">
+            </label>
+            <span class="hint" id="monitorHint">Casque obligatoire (larsen sinon).</span>
+          </div>
+          <div class="offset-row">
+            <label for="offsetMs">Décalage matériel (ms)</label>
+            <input id="offsetMs" type="number" step="1" min="-300" max="300" value="0" inputmode="numeric">
+            <span class="hint">Positif = avancée.</span>
+          </div>
+        </section>
       </div>
-      <label for="micSelect">Micro utilisé pour les enregistrements</label>
-      <div class="mic-row">
-        <select id="micSelect" aria-label="Choisir le microphone">
-          <option value="">Microphone par défaut du navigateur</option>
-        </select>
-        <button id="refreshMicsBtn" class="button button-quiet" type="button" title="Actualiser la liste">↻</button>
-      </div>
-      <div class="mic-test-row">
-        <button id="testMicBtn" class="button button-secondary" type="button">Tester le microphone</button>
-        <span id="micTestText" class="hint">Parle pour vérifier le niveau sonore.</span>
-      </div>
-      <div class="meter" aria-label="Niveau du microphone"><div id="meterFill"></div></div>
-      <p class="level-readout" id="levelReadout">niveau micro — · niveau enregistré —</p>
-      <p class="hint" id="micInfo"></p>
-      <div class="monitor-row">
-        <button id="monitorBtn" class="button button-secondary" type="button" aria-pressed="false">🎧 Activer le retour casque</button>
-        <label class="monitor-volume" for="monitorVolume" hidden>Volume du retour
-          <input id="monitorVolume" type="range" min="0" max="1.5" step="0.01" value="1">
-        </label>
-        <span class="hint" id="monitorHint">Désactivé par défaut. Casque ou écouteurs obligatoires : avec des enceintes, larsen immédiat.</span>
-      </div>
-      <div class="offset-row">
-        <label for="offsetMs">Décalage matériel (ms)</label>
-        <input id="offsetMs" type="number" step="1" min="-300" max="300" value="0" inputmode="numeric">
-        <span class="hint">Positif = la prise est avancée. Se calibre une fois par micro.</span>
-      </div>
-    </section>
 
-    <section class="panel transport-panel">
-      <div class="section-heading">
-        <div><p class="eyebrow">TRANSPORT</p><h2>Enregistrement</h2></div>
-        <span class="timer" id="timer">00:00</span>
+      <div class="col-tracks">
+        <section class="panel tracks-section">
+          <div class="section-heading">
+            <div><p class="eyebrow">VOTRE SESSION</p><h2>Pistes <span id="trackCount">0</span>/10</h2></div>
+            <button id="exportBtn" class="button button-export" type="button" disabled>Exporter le mix WAV</button>
+          </div>
+          <div class="mute-bar">
+            <button id="muteAllBtn" class="mute-all-btn" type="button" aria-pressed="false">🔇 Couper toutes les pistes</button>
+            <span class="hint" id="mixHint">Le mute général ne coupe ni le micro ni l'enregistrement.</span>
+          </div>
+          <div id="tracks" class="tracks-list">
+            <div class="empty-state"><div class="empty-icon">♫</div><strong>Aucune piste pour le moment</strong><p>Enregistre ta première voix pour commencer.</p></div>
+          </div>
+        </section>
       </div>
-      <div class="transport-buttons">
-        <button id="recordBtn" class="button button-record" type="button"><span class="record-dot"></span> Enregistrer une piste</button>
-        <button id="stopBtn" class="button button-stop" type="button" disabled>Arrêter</button>
-        <button id="playBtn" class="button button-primary" type="button">▶ Tout écouter</button>
-        <button id="toStartBtn" class="button" type="button" title="Revenir au début du projet">⏮ Début</button>
-      </div>
-      <p class="position-readout" id="positionReadout">position 0:00 · durée 0:00</p>
-      <p class="status-message" id="statusMessage" role="status">Prêt. Choisis ton microphone puis teste-le avant la première prise.</p>
-    </section>
-
-    <section class="tracks-section">
-      <div class="section-heading">
-        <div><p class="eyebrow">VOTRE SESSION</p><h2>Pistes <span id="trackCount">0</span>/10</h2></div>
-        <button id="exportBtn" class="button button-export" type="button" disabled>Exporter le mix WAV</button>
-      </div>
-      <div class="mute-bar">
-        <button id="muteAllBtn" class="mute-all-btn" type="button" aria-pressed="false">🔇 Couper toutes les pistes</button>
-        <span class="hint" id="mixHint">Le mute général ne coupe ni le micro ni l'enregistrement.</span>
-      </div>
-      <div id="tracks" class="tracks-list">
-        <div class="empty-state"><div class="empty-icon">♫</div><strong>Aucune piste pour le moment</strong><p>Enregistre ta première voix pour commencer.</p></div>
-      </div>
-    </section>
+    </div>
 
     <footer>
       <p>VoiceLayer · V1 · moteur PCM</p>

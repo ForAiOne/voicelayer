@@ -107,6 +107,22 @@ Chaque piste retient sa **position de départ** (`départ 00:45` sur sa ligne) :
 - la lecture et l'export la placent au bon moment — le mix reste synchronisé ;
 - un projet peut ainsi dépasser la durée de chaque piste prise séparément.
 
+## Mise en page : tout sur un écran
+
+Sur ordinateur (à partir de 980 px de large), l'application tient **dans une seule
+fenêtre, sans défilement de page** :
+
+- colonne de gauche : transport (en haut, toujours visible), puis micro — les réglages
+  tiennent en hauteur, vérifié jusqu'à 1000 × 700 ;
+- colonne de droite : les pistes. **Seule cette liste défile**, à l'intérieur de sa
+  colonne, quand il y a plus de pistes que de place ;
+- le nom du projet et les boutons Importer / Sauvegarder / Charger / Nouveau sont
+  remontés dans l'en-tête, sur la même ligne que le titre.
+
+Sur écran peu haut, les aides secondaires (décalage matériel, casque) se masquent pour
+laisser la place aux commandes utiles. Sur téléphone, les blocs s'empilent et la page
+défile normalement.
+
 ## Formes d'onde et synchronisation
 
 Chaque piste affiche sa forme d'onde sous son nom, avec une règle de temps au-dessus de

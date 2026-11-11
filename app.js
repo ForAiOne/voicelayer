@@ -309,8 +309,8 @@ function updateMonitorUi() {
   ui.monitorBtn.setAttribute("aria-pressed", String(monitoring));
   ui.monitorVolume.parentElement.hidden = !monitoring;
   ui.monitorHint.textContent = monitoring
-    ? "Actif pendant le test et les prises. Le micro se ferme entre deux : le retour s'arrête aussi."
-    : "Désactivé par défaut. Casque ou écouteurs obligatoires : avec des enceintes, larsen immédiat.";
+    ? "Actif pendant le test et les prises."
+    : "Désactivé par défaut. Casque obligatoire (larsen sinon).";
 }
 
 function isTouchDevice() {
@@ -1195,11 +1195,15 @@ function alignRuler() {
   const ruler = ui.list.parentElement?.querySelector(".wave-ruler");
   const canvas = ui.list.querySelector(".wave-canvas");
   if (!ruler || !canvas) return;
-  const host = ruler.parentElement.getBoundingClientRect();
-  const box = canvas.getBoundingClientRect();
-  // la carte a une bordure : la règle doit se caler sur le canevas, pas sur la liste
-  ruler.style.marginLeft = `${Math.max(0, box.left - host.left)}px`;
-  ruler.style.marginRight = `${Math.max(0, host.right - box.right)}px`;
+  // correction par écart mesuré : peu importe la bordure du panneau, la marge de
+  // la liste ou la largeur d'une barre de défilement, la règle rattrape le
+  // canevas au pixel. Auto-correctrice, donc sans effet si c'est déjà aligné.
+  const box = ruler.getBoundingClientRect();
+  const target = canvas.getBoundingClientRect();
+  const left = (parseFloat(ruler.style.marginLeft) || 0) + (target.left - box.left);
+  const right = (parseFloat(ruler.style.marginRight) || 0) + (box.right - target.right);
+  ruler.style.marginLeft = `${Math.max(0, left)}px`;
+  ruler.style.marginRight = `${Math.max(0, right)}px`;
 }
 
 function drawAllWaves() {
