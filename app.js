@@ -595,6 +595,7 @@ function stopPlayback(keepPosition = false) {
   if (state === "playing") state = "idle";
   ui.play.textContent = "▶ Tout écouter";
   updatePositionUi();
+  paintPlayhead(positionMs, true);
 }
 
 function pausePlayback() {
@@ -605,13 +606,15 @@ function pausePlayback() {
   state = "paused";
   ui.play.textContent = "▶ Reprendre";
   updatePositionUi();
-  setStatus(`Pause à ${fmt(at / 1000)}. « Reprendre » continue la lecture, et « Enregistrer une piste » fera démarrer la nouvelle prise à cet instant.`);
+  paintPlayhead(at, true);
+  setStatus(`Pause à ${fmt(at / 1000)}. Le curseur reste planté là : « Enregistrer une piste » fera démarrer la nouvelle prise à cet endroit, et « Reprendre » continue la lecture.`);
 }
 
 function backToStart() {
   if (state === "playing") stopPlayback();
   positionMs = 0;
   updatePositionUi();
+  paintPlayhead(0, true);
   setStatus("Position remise au début du projet.");
 }
 
@@ -870,8 +873,9 @@ async function stopRecording() {
   state = "finalizing";
   if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
   if (takeWatchdog) { clearTimeout(takeWatchdog); takeWatchdog = null; }
-  // on coupe l'accompagnement mais on garde la position : la prise suivante
-  // partira de là si l'utilisateur ne bouge pas le curseur de position.
+  // on fige la position exacte de l'arrêt : le curseur reste là où la prise
+  // s'est terminée, donc là où reprendra la suivante.
+  freezePosition();
   stopPlayback(true);
 
   const done = await new Promise((resolve) => {
@@ -985,6 +989,8 @@ async function finalizeTake(data) {
     state = "idle";
     setTransportLocked(false);
     if (!tracks.length) ui.timer.textContent = "00:00";
+    // le curseur reste sur le départ de la prise : on voit où reprendre la suite
+    paintPlayhead(positionMs, true);
   }
 }
 
@@ -1232,6 +1238,7 @@ function startPlayhead(when, baseMs = 0) {
   playStart = when;
   playBaseMs = baseMs;
   lastPositionPaint = 0;
+  document.querySelectorAll(".wave-playhead").forEach((el) => el.classList.remove("is-frozen"));
   if (playheadRaf) cancelAnimationFrame(playheadRaf);
   playheadRaf = requestAnimationFrame(tickPlayhead);
 }
@@ -1241,6 +1248,19 @@ function stopPlayhead() {
   playheadRaf = null;
   playStart = null;
   document.querySelectorAll(".wave-playhead").forEach((el) => { el.style.display = "none"; });
+}
+
+/* Curseur immobile : il marque l'endroit de la pause, donc là où démarrera la
+   prochaine prise. Il doit rester visible après la pause, sinon il ne reste
+   aucun repère pour enregistrer la suite. */
+function paintPlayhead(ms, frozen = true) {
+  const total = projectDuration() || 1;
+  const pct = Math.max(0, Math.min(100, ((ms || 0) / 1000 / total) * 100));
+  document.querySelectorAll(".wave-playhead").forEach((el) => {
+    el.style.display = "block";
+    el.style.left = `${pct.toFixed(3)}%`;
+    el.classList.toggle("is-frozen", !!frozen);
+  });
 }
 
 function renderTracks() {
@@ -1402,6 +1422,8 @@ function renderTracks() {
 
   alignRuler();
   updatePositionUi();
+  // la liste est reconstruite : le curseur doit être redessiné à sa position
+  if (state !== "playing" && state !== "recording") paintPlayhead(positionMs, true);
 }
 
 /* --------------------------- recalage d'une piste ----------------------- */

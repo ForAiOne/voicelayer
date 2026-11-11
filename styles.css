@@ -45,6 +45,8 @@ label{display:block;font-size:.8rem;color:#cbd5e1;margin:12px 0 8px}.project-row
 .wave-row{position:relative;background:#0e1728;padding:2px 0 10px}
 .wave-row canvas{display:block;width:100%;height:42px}
 .wave-playhead{position:absolute;top:0;bottom:0;width:2px;background:#ffb86b;box-shadow:0 0 6px #ffb86b;display:none;pointer-events:none}
+.wave-playhead.is-frozen{background:#8db5ff;box-shadow:0 0 0 1px #0e1728,0 0 7px #8db5ff}
+.wave-playhead.is-frozen::before{content:"";position:absolute;top:-1px;left:-3px;width:8px;height:8px;border-radius:2px;background:#8db5ff}
 .position-readout{font-size:.73rem;color:#aab8d0;margin:10px 0 0;font-variant-numeric:tabular-nums}
 .position-readout strong{color:#8db5ff;font-weight:600}
 footer{border-top:1px solid #26334d;margin-top:28px;padding-top:14px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}

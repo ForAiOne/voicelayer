@@ -414,9 +414,22 @@ function check(name, ok, detail) {
   }));
   await page.click("#playBtn");
   await page.waitForTimeout(300);
-  const phOff = await page.evaluate(() => document.querySelector(".wave-playhead").style.display);
+  const phAfterPause = await page.evaluate(() => {
+    const mark = document.querySelector(".wave-playhead");
+    return { display: mark.style.display, left: parseFloat(mark.style.left) || 0, frozen: mark.classList.contains("is-frozen") };
+  });
   check("curseur de lecture visible et mobile", ph2.display === "block" && ph2.left > ph1, `${ph1.toFixed(1)} % → ${ph2.left.toFixed(1)} %`);
-  check("curseur masqué à l'arrêt", phOff === "none", phOff);
+  check("curseur conservé après la pause", phAfterPause.display === "block" && phAfterPause.frozen,
+    `affiché=${phAfterPause.display} gelé=${phAfterPause.frozen} à ${phAfterPause.left.toFixed(1)} %`);
+
+  await page.click("#toStartBtn");
+  await page.waitForTimeout(250);
+  const phReset = await page.evaluate(() => {
+    const mark = document.querySelector(".wave-playhead");
+    return { display: mark.style.display, left: parseFloat(mark.style.left) || 0 };
+  });
+  check("⏮ Début ramène le curseur à zéro", phReset.display === "block" && phReset.left <= 0.5,
+    `à ${phReset.left.toFixed(1)} %`);
 
   // 9. le retour casque ne doit JAMAIS être mémorisé : sur téléphone, un retour
   // resté actif au rechargement produirait un larsen dès l'ouverture.
@@ -439,16 +452,30 @@ function check(name, ok, detail) {
   await page.waitForTimeout(1200);
   await page.click("#playBtn");          // pause
   await page.waitForTimeout(250);
-  const pausedState = await page.evaluate(() => ({
-    state,
-    positionMs: Math.round(positionMs),
-    readout: document.getElementById("positionReadout").textContent,
-    playLabel: document.getElementById("playBtn").textContent,
-  }));
+  const pausedState = await page.evaluate(() => {
+    const mark = document.querySelector(".wave-playhead");
+    return {
+      state,
+      positionMs: Math.round(positionMs),
+      readout: document.getElementById("positionReadout").textContent,
+      playLabel: document.getElementById("playBtn").textContent,
+      markDisplay: mark ? mark.style.display : "absent",
+      markLeft: mark ? parseFloat(mark.style.left) : -1,
+      markFrozen: mark ? mark.classList.contains("is-frozen") : false,
+      total: projectDuration(),
+    };
+  });
   check("pause fige la position de lecture", pausedState.state === "paused" && pausedState.positionMs > 700,
     `${pausedState.state} · ${pausedState.positionMs} ms`);
   check("position et départ annoncés", /position \d\d:\d\d/.test(pausedState.readout) && /prochaine prise/.test(pausedState.readout),
     pausedState.readout);
+
+  // le curseur doit RESTER visible à l'endroit de la pause, sinon il ne reste
+  // aucun repère pour enregistrer la suite
+  const expectedPause = (pausedState.positionMs / 1000 / pausedState.total) * 100;
+  check("le curseur reste planté à l'endroit de la pause",
+    pausedState.markDisplay === "block" && pausedState.markFrozen && Math.abs(pausedState.markLeft - expectedPause) <= 1.5,
+    `affiché=${pausedState.markDisplay} gelé=${pausedState.markFrozen} à ${pausedState.markLeft.toFixed(1)} % (attendu ${expectedPause.toFixed(1)} %)`);
 
   const takeStart = pausedState.positionMs;
   await page.click("#recordBtn");
@@ -487,6 +514,17 @@ function check(name, ok, detail) {
   check("forme d'onde placée à son départ sur la timeline",
     Math.abs(starts[starts.length - 1] - expectedStart) <= 4 && starts[0] <= 1,
     `départs dessinés ${starts.join(" % / ")} % — attendu ${expectedStart} % pour la dernière`);
+
+  // après la prise, le curseur reste à l'endroit où elle s'est terminée :
+  // c'est de là que repartira la suivante
+  const expectedEnd = Math.round((((midTake.startMs / 1000) + midTake.duration) / midTake.projectDuration) * 100);
+  const markAfterTake = await page.evaluate(() => {
+    const mark = document.querySelector(".wave-playhead");
+    return { display: mark.style.display, left: parseFloat(mark.style.left), frozen: mark.classList.contains("is-frozen") };
+  });
+  check("le curseur reste à la fin de la prise",
+    markAfterTake.display === "block" && Math.abs(markAfterTake.left - expectedEnd) <= 2.5,
+    `${markAfterTake.display} à ${markAfterTake.left.toFixed(1)} % (fin de prise attendue ${expectedEnd} %)`);
 
   // export : la piste doit être audible à partir de son départ, et le silence
   // doit précéder. Les autres pistes sont mises en mute pour isoler la preuve.

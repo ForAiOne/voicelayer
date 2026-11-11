@@ -84,6 +84,10 @@ Le bouton **▶ Tout écouter** devient **⏸ Pause** pendant la lecture : il fi
 et le bouton **⏮ Début** la ramène à zéro. Sous les boutons, une ligne indique
 `position 00:45 · durée 03:12` et, quand ce n'est pas zéro, `prochaine prise à 00:45`.
 
+Le **curseur reste planté** à l'endroit de la pause (bleu, avec un repère en haut) : on
+voit toujours où la suite démarrera. Pendant la lecture il est orange et il avance ; après
+une prise il reste à l'endroit où elle s'est terminée, donc là où repartira la suivante.
+
 **Enregistrer en plein milieu** se fait de deux façons, sans réglage préalable :
 
 - **Pause, puis « Enregistrer une piste »** : la nouvelle prise démarre exactement à la
