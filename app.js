@@ -34,7 +34,7 @@ const ui = {
   micSelect: $("micSelect"), refreshMics: $("refreshMicsBtn"), testMic: $("testMicBtn"),
   micTestText: $("micTestText"), micState: $("micState"), meter: $("meterFill"), offset: $("offsetMs"),
   record: $("recordBtn"), stop: $("stopBtn"), play: $("playBtn"), timer: $("timer"), status: $("statusMessage"),
-  list: $("tracks"), count: $("trackCount"), export: $("exportBtn"), muteAll: $("muteAllBtn"),
+  list: $("tracks"), count: $("trackCount"), export: $("exportBtn"), muteAll: $("muteAllBtn"), mixHint: $("mixHint"),
 };
 
 let ctx = null;
@@ -170,6 +170,20 @@ function int16ToFloat32(int16) {
   for (let i = 0; i < int16.length; i++) out[i] = int16[i] / 32768;
   return out;
 }
+
+/* Niveau max d'un bloc PCM. Sert à distinguer une prise réelle d'une prise
+   silencieuse : « je n'entends rien » veut dire soit micro qui ne capte rien,
+   soit lecture muette. Ce nombre tranche entre les deux. */
+function peakOf(int16) {
+  let peak = 0;
+  for (let i = 0; i < int16.length; i++) {
+    const a = int16[i] < 0 ? -int16[i] : int16[i];
+    if (a > peak) peak = a;
+  }
+  return peak / 32768;
+}
+
+const SILENT_PEAK = 0.004;
 
 /* ------------------------------- IndexedDB ------------------------------- */
 
@@ -446,7 +460,9 @@ async function playAll() {
     const sources = await scheduleTracks(items, startAt);
     state = "playing";
     ui.play.textContent = "■ Arrêter l'écoute";
-    setStatus("Lecture de toutes les pistes.");
+    setStatus(allMuted
+      ? "Lecture lancée, mais TOUTES LES PISTES SONT MUETTES : tu n'entendras rien. Clique « Réactiver toutes les pistes »."
+      : "Lecture de toutes les pistes.");
 
     let ended = 0;
     sources.forEach((source) => {
@@ -636,12 +652,15 @@ async function finalizeTake(data) {
 
     if (duration < MIN_TAKE) throw new Error("prise trop courte, rien n'a été conservé");
 
+    const peak = peakOf(kept);
+
     const track = {
       id: crypto.randomUUID(),
       name: `Piste ${tracks.length + 1}`,
       blob: wavFromInt16(kept, sampleRate, 1),
       sampleRate,
       duration,
+      peak,
       volume: 1,
       muted: false,
       createdAt: Date.now(),
@@ -652,9 +671,16 @@ async function finalizeTake(data) {
     renderTracks();
 
     ui.timer.textContent = fmt(duration);
-    ui.micState.textContent = "Prêt";
-    ui.micState.className = "mic-state";
-    setStatus(`Piste enregistrée : ${fmt(duration)} (${Math.round(track.blob.size / 1024)} Ko).`);
+
+    if (peak < SILENT_PEAK) {
+      ui.micState.textContent = "Micro muet ?";
+      ui.micState.className = "mic-state error";
+      setStatus(`Prise enregistrée mais SILENCIEUSE : le micro n'a capté aucun son sur ${fmt(duration)}. Vérifie le micro sélectionné, puis le niveau d'entrée dans Windows (Paramètres › Système › Son › Entrée). Clique ⤓ pour garder quand même le fichier.`);
+    } else {
+      ui.micState.textContent = "Prêt";
+      ui.micState.className = "mic-state";
+      setStatus(`Piste enregistrée : ${fmt(duration)}, niveau max ${Math.round(peak * 100)} % (${Math.round(track.blob.size / 1024)} Ko).`);
+    }
   } catch (error) {
     setStatus(`Piste non enregistrée : ${error.message}`);
   } finally {
@@ -670,6 +696,10 @@ async function finalizeTake(data) {
 function updateMuteAllButton() {
   ui.muteAll.textContent = allMuted ? "🔊 Réactiver toutes les pistes" : "🔇 Couper toutes les pistes";
   ui.muteAll.setAttribute("aria-pressed", String(allMuted));
+  ui.mixHint.textContent = allMuted
+    ? "⚠️ Toutes les pistes sont muettes : la lecture sera silencieuse. Le micro, lui, reste actif et l'enregistrement continue."
+    : "Le mute général ne coupe ni le micro ni l'enregistrement.";
+  ui.mixHint.classList.toggle("hint-alert", allMuted);
 }
 
 function applyGainToLivePlayback(track) {
@@ -731,8 +761,9 @@ function renderTracks() {
   tracks.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
 
   tracks.forEach((track, index) => {
+    const silent = typeof track.peak === "number" && track.peak < SILENT_PEAK;
     const card = document.createElement("article");
-    card.className = "track-card" + (track.muted ? " is-muted" : "");
+    card.className = "track-card" + (track.muted ? " is-muted" : "") + (silent ? " is-silent" : "");
 
     const head = document.createElement("div");
     head.className = "track-head";
@@ -743,7 +774,8 @@ function renderTracks() {
     title.textContent = track.name || `Piste ${index + 1}`;
     const sub = document.createElement("div");
     sub.className = "track-subtitle";
-    sub.textContent = `${fmt(track.duration || 0)} · WAV ${track.sampleRate || ctx?.sampleRate || 0} Hz · ${Math.round((track.blob?.size || 0) / 1024)} Ko`;
+    sub.textContent = `${fmt(track.duration || 0)} · WAV ${track.sampleRate || ctx?.sampleRate || 0} Hz · ${Math.round((track.blob?.size || 0) / 1024)} Ko`
+      + (silent ? " · ⚠ SILENCIEUSE (micro sans signal)" : "");
     info.append(title, sub);
 
     const rename = document.createElement("button");
@@ -939,6 +971,7 @@ async function importAudioFiles(fileList) {
         blob: wavFromInt16(pcm, ctx.sampleRate, 1),
         sampleRate: ctx.sampleRate,
         duration: pcm.length / ctx.sampleRate,
+        peak: peakOf(pcm),
         volume: 1,
         muted: false,
         createdAt: Date.now(),
@@ -1061,7 +1094,6 @@ async function clearProject() {
 }
 
 /* -------------------------- migration V0.2 -> V1 ------------------------ */
-
 /* Une piste de la V0.2 est un Blob WebM/Opus : illisible par le moteur PCM.
    On la convertit en WAV une fois, sans jamais supprimer l'original avant
    que la conversion ait réussi. */
@@ -1086,6 +1118,7 @@ async function migrateTracks() {
       track.blob = wavFromInt16(pcm, ctx.sampleRate, 1);
       track.sampleRate = ctx.sampleRate;
       track.duration = pcm.length / ctx.sampleRate;
+      track.peak = peakOf(pcm);
       if (typeof track.volume !== "number") track.volume = 1;
       track.muted = !!track.muted;
       await storeItem("tracks", track);
@@ -1098,6 +1131,23 @@ async function migrateTracks() {
 }
 
 /* -------------------------------- init ---------------------------------- */
+
+/* Les pistes restaurées ou importées peuvent ne pas avoir de niveau mesuré :
+   on le calcule une fois pour que l'écran distingue une prise réelle d'une
+   prise silencieuse, y compris sur les anciennes prises. */
+async function ensurePeaks() {
+  const missing = tracks.filter((t) => typeof t.peak !== "number");
+  for (const track of missing) {
+    try {
+      const pcm = await readPcm16(track.blob);
+      track.peak = peakOf(pcm.samples);
+      await storeItem("tracks", track);
+    } catch {
+      /* piste illisible : on la laisse affichée telle quelle */
+    }
+  }
+  return missing.length;
+}
 
 ui.record.addEventListener("click", startRecording);
 ui.stop.addEventListener("click", stopRecording);
@@ -1164,6 +1214,9 @@ if ("serviceWorker" in navigator) {
     } else if (!tracks.length) {
       setStatus("Prêt. Choisis ton microphone, teste-le, puis enregistre une première piste.");
     }
+
+    await ensurePeaks();
+    renderTracks();
 
     ui.engine.textContent = `Moteur PCM ${ctx.sampleRate} Hz`;
   } catch (error) {

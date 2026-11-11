@@ -4,16 +4,6 @@ Application web locale (HTML/CSS/JS, sans build) pour enregistrer plusieurs pris
 vocales superposées, les écouter ensemble, les mixer et exporter un WAV à importer
 dans Suno. Cible finale : Android en PWA. Pour l'instant : ton PC Windows + Chrome.
 
-## Version en ligne (recommandée sur PC et Android)
-
-**https://foraione.github.io/voicelayer/**
-
-Une adresse HTTPS unique : pas de Live Server, pas de port, pas de risque d'ouvrir
-le mauvais dossier. Le micro et l'AudioWorklet y fonctionnent, y compris depuis un
-téléphone Android. Attention : le stockage (IndexedDB) est lié à l'adresse, donc
-`https://foraione.github.io/voicelayer/` et `http://127.0.0.1:5500/` sont **deux
-projets séparés** — ne mélange pas les deux.
-
 ## Lancer
 
 1. Ouvrir le dossier dans VS Code.
@@ -56,6 +46,14 @@ enregistrées et la superposition devient inaudible.
 Suno). Le fichier est ramené à la fréquence du projet et devient une piste comme une
 autre : tu peux chanter dessus, la mettre en mute, etc.
 
+## Le témoin de silence
+
+Après chaque prise, l'application mesure le niveau réellement capté et l'annonce
+(« niveau max 62 % »). Si le micro n'a rien capté, la piste est enregistrée quand
+même — rien n'est perdu — mais elle porte la mention **⚠ SILENCIEUSE** et la carte
+passe en rouge. C'est ce qui distingue « le micro n'a rien pris » de « le son ne
+sort pas » : dans le second cas, la piste affiche un niveau normal.
+
 ## Le décalage : ce qui reste à régler
 
 Le logiciel ne décale plus rien : la prise est calée en échantillons sur le départ de
@@ -88,9 +86,8 @@ Les prises vivent dans IndexedDB, donc dans **ce navigateur, sur cet appareil**.
 
 ## Vérifications automatiques
 
-Le dossier `tests/` contient deux scripts Playwright qui pilotent un vrai Chrome
-avec un faux microphone (`npm install`, puis `python3 -m http.server 8099` dans le
-dossier de l'app, puis `node tests/e2e.js`) :
+Le dossier `../test/` contient deux scripts Playwright qui pilotent un vrai Chrome
+avec un faux microphone :
 
 - `e2e.js` — 17 contrôles : démarrage du moteur, jauge micro, annulation du décompte,
   prise réelle, **alignement de la durée**, export stéréo 16 bits, mute général sans

@@ -5,7 +5,7 @@
   "description": "Contrôles automatiques de VoiceLayer (Chrome piloté, faux microphone)",
   "scripts": {
     "servir": "python3 -m http.server 8099 --bind 127.0.0.1",
-    "test": "node tests/e2e.js && node tests/migration.js"
+    "test": "node tests/e2e.js && node tests/migration.js && node tests/silence.js"
   },
   "devDependencies": {
     "playwright-core": "^1.49.0"
