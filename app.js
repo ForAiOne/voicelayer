@@ -586,6 +586,7 @@ function stopPlayback() {
   playSources.forEach((s) => { try { s.stop(); } catch { } });
   playSources = [];
   playGains.clear();
+  stopPlayhead();
   if (state === "playing") state = "idle";
   ui.play.textContent = "▶ Tout écouter";
 }
@@ -627,6 +628,7 @@ async function playAll() {
     const startAt = ctx.currentTime + 0.1;
     const sources = await scheduleTracks(items, startAt);
     state = "playing";
+    startPlayhead(startAt);
     ui.play.textContent = "■ Arrêter l'écoute";
     setStatus(allMuted
       ? "Lecture lancée, mais TOUTES LES PISTES SONT MUETTES : tu n'entendras rien. Clique « Réactiver toutes les pistes »."
@@ -650,8 +652,10 @@ async function playSingle(track) {
     await ensureCtx();
     stopPlayback();
     const buffer = await bufferFor(track);
-    await scheduleTracks([{ id: track.id, buffer, gain: gainFor(track) }], ctx.currentTime + 0.05);
+    const startAt = ctx.currentTime + 0.05;
+    await scheduleTracks([{ id: track.id, buffer, gain: gainFor(track) }], startAt);
     state = "playing";
+    startPlayhead(startAt);
     ui.play.textContent = "■ Arrêter l'écoute";
     setStatus(`Lecture : ${track.name || "piste"}.`);
     const source = playSources[0];
@@ -968,6 +972,174 @@ function safeName(name) {
   return (name || "VoiceLayer").trim().replace(/[^\w\-]+/g, "_").slice(0, 60) || "VoiceLayer";
 }
 
+/* --------------------------- formes d'onde ------------------------------ */
+
+/* Toutes les pistes sont dessinées sur LA MÊME échelle de temps (0 → durée du
+   projet). C'est ce qui permet de voir où l'on démarre par rapport aux autres
+   prises, et donc de se synchroniser. L'amplitude, elle, est normalisée piste
+   par piste : une voix douce reste lisible sans écraser les autres. */
+const waveCache = new Map();
+let playheadRaf = null;
+let playStart = null;
+
+function projectDuration() {
+  return tracks.reduce((max, track) => Math.max(max, track.duration || 0), 0);
+}
+
+async function waveformFor(track) {
+  const key = `${track.id}:${track.createdAt}`;
+  if (waveCache.has(key)) return waveCache.get(key);
+
+  const pcm = await readPcm16(track.blob);
+  const buckets = 1400;
+  const step = pcm.samples.length / buckets;
+  const min = new Float32Array(buckets);
+  const max = new Float32Array(buckets);
+
+  for (let b = 0; b < buckets; b++) {
+    const start = Math.floor(b * step);
+    const end = Math.max(start + 1, Math.min(pcm.samples.length, Math.floor((b + 1) * step)));
+    let lo = 0;
+    let hi = 0;
+    for (let i = start; i < end; i++) {
+      const v = pcm.samples[i] / 32768;
+      if (v < lo) lo = v;
+      if (v > hi) hi = v;
+    }
+    min[b] = lo;
+    max[b] = hi;
+  }
+
+  const wave = { min, max, duration: pcm.samples.length / pcm.sampleRate };
+  waveCache.set(key, wave);
+  return wave;
+}
+
+function drawWave(canvas, wave, track, total) {
+  const dpr = window.devicePixelRatio || 1;
+  const width = Math.max(60, canvas.clientWidth || canvas.parentElement?.clientWidth || 300);
+  const height = 42;
+  canvas.width = Math.round(width * dpr);
+  canvas.height = Math.round(height * dpr);
+
+  const g = canvas.getContext("2d");
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, width, height);
+
+  const mid = height / 2;
+  g.strokeStyle = "rgba(141,181,255,.22)";
+  g.beginPath();
+  g.moveTo(0, mid);
+  g.lineTo(width, mid);
+  g.stroke();
+
+  if (!wave || !total) return;
+
+  const silent = typeof track.peak === "number" && track.peak < SILENT_PEAK;
+  g.fillStyle = track.muted
+    ? "rgba(148,163,184,.5)"
+    : silent ? "rgba(255,150,160,.8)" : "rgba(141,181,255,.9)";
+
+  // normalisation : la crête de la piste occupe 90 % de la demi-hauteur, avec
+  // un plafond pour ne pas transformer le souffle d'une piste muette en bloc plein.
+  const norm = Math.min(20, 0.9 / Math.max(0.03, typeof track.peak === "number" ? track.peak : 1));
+
+  const count = wave.min.length;
+  const span = Math.max(1, (wave.duration / total) * width);
+  const columns = Math.max(1, Math.round(span));
+
+  for (let x = 0; x < columns && x < width; x++) {
+    const b0 = Math.floor((x / columns) * count);
+    const b1 = Math.min(count, Math.max(b0 + 1, Math.floor(((x + 1) / columns) * count)));
+    let lo = 0;
+    let hi = 0;
+    for (let b = b0; b < b1; b++) {
+      if (wave.min[b] < lo) lo = wave.min[b];
+      if (wave.max[b] > hi) hi = wave.max[b];
+    }
+    const top = mid - Math.min(1, hi * norm) * (mid - 2);
+    const bottom = mid - Math.max(-1, lo * norm) * (mid - 2);
+    g.fillRect(x, top, 1, Math.max(1, bottom - top));
+  }
+}
+
+function formatTick(seconds) {
+  const m = Math.floor(seconds / 60);
+  const s = Math.round(seconds % 60);
+  return m ? `${m}:${String(s).padStart(2, "0")}` : `${Math.round(seconds)} s`;
+}
+
+function renderRuler(ruler, total) {
+  ruler.innerHTML = "";
+  if (!total) return;
+  const step = [2, 5, 10, 15, 30, 60, 120, 300, 600].find((candidate) => total / candidate <= 6) || 900;
+  for (let t = 0; t <= total + 0.001; t += step) {
+    const tick = document.createElement("span");
+    tick.textContent = formatTick(t);
+    tick.style.left = `${(t / total) * 100}%`;
+    ruler.append(tick);
+  }
+}
+
+function alignRuler() {
+  const ruler = ui.list.parentElement?.querySelector(".wave-ruler");
+  const canvas = ui.list.querySelector(".wave-canvas");
+  if (!ruler || !canvas) return;
+  const host = ruler.parentElement.getBoundingClientRect();
+  const box = canvas.getBoundingClientRect();
+  // la carte a une bordure : la règle doit se caler sur le canevas, pas sur la liste
+  ruler.style.marginLeft = `${Math.max(0, box.left - host.left)}px`;
+  ruler.style.marginRight = `${Math.max(0, host.right - box.right)}px`;
+}
+
+function drawAllWaves() {
+  const total = projectDuration();
+  const ruler = ui.list.parentElement?.querySelector(".wave-ruler");
+  if (ruler) renderRuler(ruler, total);
+
+  ui.list.querySelectorAll(".wave-canvas").forEach((canvas) => {
+    const track = tracks.find((t) => t.id === canvas.dataset.trackId);
+    if (!track) return;
+    const wave = waveCache.get(`${track.id}:${track.createdAt}`);
+    if (wave) {
+      drawWave(canvas, wave, track, total);
+    } else {
+      waveformFor(track)
+        .then((computed) => { if (canvas.isConnected) drawWave(canvas, computed, track, total); })
+        .catch(() => { });
+    }
+  });
+  alignRuler();
+}
+
+function tickPlayhead() {
+  if (state !== "playing" || !ctx || playStart === null) {
+    stopPlayhead();
+    return;
+  }
+  const total = projectDuration() || 1;
+  const elapsed = Math.max(0, ctx.currentTime - playStart);
+  const pct = Math.min(100, (elapsed / total) * 100);
+  document.querySelectorAll(".wave-playhead").forEach((el) => {
+    el.style.display = "block";
+    el.style.left = `${pct.toFixed(3)}%`;
+  });
+  playheadRaf = requestAnimationFrame(tickPlayhead);
+}
+
+function startPlayhead(when) {
+  playStart = when;
+  if (playheadRaf) cancelAnimationFrame(playheadRaf);
+  playheadRaf = requestAnimationFrame(tickPlayhead);
+}
+
+function stopPlayhead() {
+  if (playheadRaf) cancelAnimationFrame(playheadRaf);
+  playheadRaf = null;
+  playStart = null;
+  document.querySelectorAll(".wave-playhead").forEach((el) => { el.style.display = "none"; });
+}
+
 function renderTracks() {
   ui.list.innerHTML = "";
   ui.count.textContent = tracks.length;
@@ -975,11 +1147,23 @@ function renderTracks() {
   updateMuteAllButton();
 
   if (!tracks.length) {
+    ui.list.parentElement?.querySelector(".wave-ruler")?.remove();
     ui.list.innerHTML = '<div class="empty-state"><div class="empty-icon">♫</div><strong>Aucune piste pour le moment</strong><p>Enregistre ta première voix pour commencer.</p></div>';
     return;
   }
 
   tracks.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+
+  // règle de temps commune : même largeur que les cartes, donc les formes
+  // d'onde de toutes les pistes se lisent verticalement.
+  const total = projectDuration();
+  let ruler = ui.list.parentElement?.querySelector(".wave-ruler");
+  if (!ruler && ui.list.parentElement) {
+    ruler = document.createElement("div");
+    ruler.className = "wave-ruler";
+    ui.list.parentElement.insertBefore(ruler, ui.list);
+  }
+  if (ruler) renderRuler(ruler, total);
 
   tracks.forEach((track, index) => {
     const silent = typeof track.peak === "number" && track.peak < SILENT_PEAK;
@@ -1089,9 +1273,30 @@ function renderTracks() {
 
     actions.append(listen, mute, nudge, save, remove);
     controls.append(volumeLabel, actions);
-    card.append(head, controls);
+
+    const waveRow = document.createElement("div");
+    waveRow.className = "wave-row";
+    const canvas = document.createElement("canvas");
+    canvas.className = "wave-canvas";
+    canvas.dataset.trackId = track.id;
+    canvas.setAttribute("role", "img");
+    canvas.setAttribute("aria-label", `Forme d'onde de ${track.name || "la piste"} sur l'échelle du projet`);
+    canvas.title = track.muted
+      ? "Piste muette : la forme d'onde reste affichée comme repère de synchronisation."
+      : "Forme d'onde sur l'échelle du projet — repère pour synchroniser les autres voix.";
+    const wavePlayhead = document.createElement("div");
+    wavePlayhead.className = "wave-playhead";
+    waveRow.append(canvas, wavePlayhead);
+
+    card.append(head, waveRow, controls);
     ui.list.append(card);
+
+    waveformFor(track)
+      .then((wave) => { if (canvas.isConnected) drawWave(canvas, wave, track, total); })
+      .catch((error) => console.warn("Forme d'onde indisponible", error));
   });
+
+  alignRuler();
 }
 
 /* --------------------------- recalage d'une piste ----------------------- */
@@ -1120,6 +1325,7 @@ async function shiftTrack(track, advanceMs) {
   track.nudgeMs = Math.round((track.nudgeMs || 0) + advanceMs);
   await storeItem("tracks", track);
   bufferCache.delete(`${track.id}:${track.createdAt}`);
+  waveCache.delete(`${track.id}:${track.createdAt}`);
   renderTracks();
 }
 
@@ -1443,6 +1649,14 @@ ui.newProject.addEventListener("click", clearProject);
 ui.testMic.addEventListener("click", toggleMicTest);
 ui.monitorBtn.addEventListener("click", toggleMonitoring);
 ui.monitorVolume.addEventListener("input", applyMonitorGain);
+
+// le redessin au redimensionnement doit passer par les formes d'onde déjà
+// calculées, sans reconstruire la liste (et sans perdre le focus des curseurs).
+let waveResizeTimer = null;
+window.addEventListener("resize", () => {
+  clearTimeout(waveResizeTimer);
+  waveResizeTimer = setTimeout(drawAllWaves, 160);
+});
 ui.refreshMics.addEventListener("click", refreshMicrophones);
 ui.muteAll.addEventListener("click", () => setMasterMuted(!allMuted));
 

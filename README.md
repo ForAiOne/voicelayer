@@ -78,6 +78,26 @@ le larsen est immédiat.
 - Le micro se ferme entre deux prises, donc le retour s'arrête aussi. Il reprend tout
   seul à la prise suivante.
 
+## Formes d'onde et synchronisation
+
+Chaque piste affiche sa forme d'onde sous son nom, avec une règle de temps au-dessus de
+la liste et un curseur orange qui avance pendant l'écoute. Deux points à retenir :
+
+- **L'échelle de temps est commune à toutes les pistes** (`0` → durée de la plus longue).
+  Une piste de 3 s n'occupe donc que la moitié de la largeur si le projet dure 6 s : on
+  voit immédiatement où chaque voix démarre, et deux pistes alignées se superposent
+  verticalement.
+- **L'amplitude est normalisée piste par piste** : une voix douce reste lisible au lieu
+  d'être écrasée par une voix forte. La hauteur ne compare donc pas les volumes — les
+  curseurs **Volume** s'en chargent.
+
+Pour se synchroniser sur une prise existante : écoute-la, repère la position du curseur
+là où la voix entre, puis place ton entrée au même endroit sur la règle. Après la prise,
+les boutons **◀ 10 ms / 10 ms ▶** ajustent finement.
+
+Une piste muette garde sa forme d'onde, en gris : elle sert de repère même quand on ne
+veut pas l'entendre. Une piste silencieuse s'affiche en rouge.
+
 ## Le témoin de silence
 
 Après chaque prise, l'application mesure le niveau réellement capté et l'annonce
