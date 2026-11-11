@@ -652,17 +652,54 @@ function check(name, ok, detail) {
   check("les pistes défilent dans leur colonne, pas la page",
     fit.listOverflow === "auto" && fit.listScrolls, `overflow=${fit.listOverflow} · ${fit.cards} cartes · ${fit.listScrollHeight}/${fit.listHeight} px · défile=${fit.listScrolls}`);
 
-  // sur téléphone, les blocs s'empilent (le défilement de page redevient normal)
+  // sur téléphone : transport puis pistes en premier, réglages micro repliés
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForTimeout(400);
-  const mobile = await page.evaluate(() => ({
-    display: getComputedStyle(document.querySelector(".workspace")).display,
-    recordVisible: !!document.getElementById("recordBtn").offsetParent,
-    bodyOverflow: getComputedStyle(document.body).overflow,
+  const mobile = await page.evaluate(() => {
+    const rect = (sel) => {
+      const el = document.querySelector(sel);
+      return el ? Math.round(el.getBoundingClientRect().top) : -1;
+    };
+    return {
+      display: getComputedStyle(document.querySelector(".workspace")).display,
+      bodyOverflow: getComputedStyle(document.body).overflow,
+      recordTop: rect("#recordBtn"),
+      tracksTop: rect(".tracks-section"),
+      micTop: rect(".mic-panel"),
+      micBodyHidden: document.getElementById("micSelect").offsetParent === null,
+      toggleVisible: !!document.getElementById("micToggle").offsetParent,
+    };
+  });
+  check("sur téléphone, les blocs s'empilent en flex",
+    mobile.display === "flex" && mobile.bodyOverflow !== "hidden", JSON.stringify(mobile));
+  check("sur téléphone, le transport et les pistes passent avant les réglages",
+    mobile.recordTop < mobile.tracksTop && mobile.tracksTop < mobile.micTop,
+    `enregistrer ${mobile.recordTop} px · pistes ${mobile.tracksTop} px · micro ${mobile.micTop} px`);
+  check("sur téléphone, les réglages micro sont repliés",
+    mobile.micBodyHidden && mobile.toggleVisible, `replié=${mobile.micBodyHidden} bouton=${mobile.toggleVisible}`);
+
+  await page.click("#micToggle");
+  await page.waitForTimeout(300);
+  const opened = await page.evaluate(() => ({
+    visible: document.getElementById("micSelect").offsetParent !== null,
+    label: document.getElementById("micToggle").textContent,
+    expanded: document.getElementById("micToggle").getAttribute("aria-expanded"),
   }));
-  check("sur téléphone, les blocs s'empilent",
-    mobile.display === "block" && mobile.recordVisible && mobile.bodyOverflow !== "hidden",
-    JSON.stringify(mobile));
+  check("le bouton Réglages déplie le panneau micro",
+    opened.visible && opened.expanded === "true" && /Masquer/.test(opened.label), JSON.stringify(opened));
+
+  // le transport reste collé en haut pendant qu'on fait défiler les pistes
+  await page.evaluate(() => window.scrollTo(0, 700));
+  await page.waitForTimeout(250);
+  const sticky = await page.evaluate(() => ({
+    scrollY: Math.round(window.scrollY),
+    recordTop: Math.round(document.getElementById("recordBtn").getBoundingClientRect().top),
+    position: getComputedStyle(document.querySelector(".transport-panel")).position,
+  }));
+  await page.evaluate(() => window.scrollTo(0, 0));
+  check("sur téléphone, le transport reste accessible en défilant",
+    sticky.position === "sticky" && sticky.scrollY > 100 && sticky.recordTop >= 0 && sticky.recordTop < 130,
+    `position=${sticky.position} · défilé ${sticky.scrollY} px · bouton à ${sticky.recordTop} px`);
 
   check("aucune erreur JavaScript", errors.length === 0, errors.slice(0, 3).join(" | ") || "aucune");
 

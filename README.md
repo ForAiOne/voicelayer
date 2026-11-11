@@ -120,8 +120,19 @@ fenêtre, sans défilement de page** :
   remontés dans l'en-tête, sur la même ligne que le titre.
 
 Sur écran peu haut, les aides secondaires (décalage matériel, casque) se masquent pour
-laisser la place aux commandes utiles. Sur téléphone, les blocs s'empilent et la page
-défile normalement.
+laisser la place aux commandes utiles.
+
+### Sur téléphone
+
+L'ordre change, pour ne pas traverser un formulaire avant d'atteindre ses pistes :
+
+1. **Transport en haut, collé** (`position: sticky`) : le bouton *Enregistrer* reste
+   visible pendant tout le défilement des pistes.
+2. **Les pistes juste en dessous.**
+3. **Les réglages micro repliés** en bas, derrière un bouton **Réglages** — nom du micro,
+   test, jauge, retour casque, décalage matériel. Rien n'est perdu, tout est à un clic.
+4. Le nom du projet et Importer / Sauvegarder / Charger / Nouveau tiennent sur une seule
+   ligne défilante dans l'en-tête.
 
 ## Formes d'onde et synchronisation
 

@@ -4,6 +4,8 @@ button,input,select{font:inherit}.app{width:min(760px,100%);margin:auto;padding:
 .topbar,.section-heading,.project-row,.transport-buttons,.track-head,.track-controls{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .topbar{margin-bottom:22px}.eyebrow{font-size:.68rem;letter-spacing:.16em;color:#9ca3af;font-weight:800;margin:0 0 5px}
 .brand{flex:0 0 auto}
+.heading-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.mic-toggle{display:none}
 .project-strip{display:flex;align-items:center;gap:7px;flex:1 1 auto;justify-content:center;min-width:0;flex-wrap:wrap}
 .project-strip input{flex:1 1 160px;min-width:120px;max-width:260px;background:#0d1528;border:1px solid #34415e;border-radius:10px;color:#fff;padding:9px 11px;font-size:.82rem}
 .project-strip .button{flex:0 0 auto;padding:9px 11px;font-size:.78rem}
@@ -95,4 +97,26 @@ footer{border-top:1px solid #26334d;margin-top:28px;padding-top:14px;display:fle
   .tracks-list{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;margin-top:10px;padding:0 14px 14px}
   footer{display:none}
 }
+/* --- téléphone : le transport et les pistes d'abord, les réglages micro repliés --- */
+@media (max-width:979px){
+  .workspace{display:flex;flex-direction:column;gap:12px}
+  /* les colonnes s'effacent : leurs blocs deviennent les enfants directs de la page,
+     ce qui permet de mettre les pistes juste sous le transport */
+  .col-controls,.col-tracks{display:contents}
+  .transport-panel{order:1;margin-bottom:0;position:sticky;top:0;z-index:8;background:rgba(16,24,42,.97)}
+  .topbar{margin-bottom:12px}
+  h1{font-size:1.4rem}
+  .topbar .eyebrow{display:none}
+  .tracks-section{order:2;margin-top:0;margin-bottom:0}
+  .mic-panel{order:3;margin-bottom:0}
+  footer{order:4}
+  .mic-toggle{display:inline-flex}
+  .mic-panel:not(.is-open) > *:not(.section-heading){display:none}
+  .mic-panel:not(.is-open) .section-heading{margin-bottom:0}
+  .topbar{flex-wrap:wrap;gap:10px}
+  .project-strip{order:3;flex:1 1 100%;flex-wrap:nowrap;overflow-x:auto;justify-content:flex-start;padding-bottom:2px}
+  .project-strip input{flex:0 0 132px;max-width:none}
+  .project-strip .button{flex:0 0 auto;padding:8px 10px}
+}
+
 @media(max-width:520px){.app{padding:18px 13px 36px}.panel{padding:15px}.transport-buttons{display:grid;grid-template-columns:1fr 1fr}.button-record{grid-column:1/-1}.section-heading{align-items:flex-end}.button-export{padding:10px 11px;font-size:.8rem}.mic-test-row{align-items:flex-start}.mic-test-row .hint{flex:1;min-width:130px}.track-actions{justify-content:flex-start}}

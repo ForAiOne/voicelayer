@@ -35,6 +35,7 @@ const ui = {
   micTestText: $("micTestText"), micState: $("micState"), meter: $("meterFill"), offset: $("offsetMs"),
   micInfo: $("micInfo"), levelReadout: $("levelReadout"),
   monitorBtn: $("monitorBtn"), monitorVolume: $("monitorVolume"), monitorHint: $("monitorHint"),
+  micToggle: $("micToggle"), micPanel: document.querySelector(".mic-panel"),
   position: $("positionReadout"), toStart: $("toStartBtn"),
   record: $("recordBtn"), stop: $("stopBtn"), play: $("playBtn"), timer: $("timer"), status: $("statusMessage"),
   list: $("tracks"), count: $("trackCount"), export: $("exportBtn"), muteAll: $("muteAllBtn"), mixHint: $("mixHint"),
@@ -1842,6 +1843,15 @@ ui.newProject.addEventListener("click", clearProject);
 ui.testMic.addEventListener("click", toggleMicTest);
 ui.monitorBtn.addEventListener("click", toggleMonitoring);
 ui.monitorVolume.addEventListener("input", applyMonitorGain);
+
+// sur téléphone, les réglages micro sont repliés par défaut (voir styles.css) :
+// les pistes doivent être visibles tout de suite, sans traverser un formulaire.
+ui.micToggle.addEventListener("click", () => {
+  const open = ui.micPanel.classList.toggle("is-open");
+  ui.micToggle.setAttribute("aria-expanded", String(open));
+  ui.micToggle.textContent = open ? "Masquer" : "Réglages";
+  if (open) ui.micPanel.scrollIntoView({ block: "nearest", behavior: "smooth" });
+});
 
 // le redessin au redimensionnement doit passer par les formes d'onde déjà
 // calculées, sans reconstruire la liste (et sans perdre le focus des curseurs).
