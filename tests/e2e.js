@@ -217,6 +217,22 @@ function check(name, ok, detail) {
   });
   check("recalage +10 ms appliqué", Math.abs(after - (wav.duration + 0.01)) < 0.002, `${before} → ${after.toFixed(3)} s`);
 
+  // 7 bis. le calage doit être visible en permanence sur la piste
+  const nudgeLabel = await page.textContent(".track-subtitle");
+  const nudgeTotal = await page.evaluate(() => tracks[0].nudgeMs);
+  check("calage cumulé affiché sur la piste", /calage \+10 ms/.test(nudgeLabel) && nudgeTotal === 10, nudgeLabel);
+
+  // 7 ter. le bouton de remise à zéro annule le calage
+  await page.click(".nudge button:nth-child(3)");
+  await page.waitForTimeout(900);
+  const afterReset = await page.evaluate(async () => {
+    const db = await new Promise((res, rej) => { const r = indexedDB.open("voicelayer-db", 1); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+    const all = await new Promise((res, rej) => { const r = db.transaction("tracks").objectStore("tracks").getAll(); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+    return { duration: all[0].duration, nudgeMs: all[0].nudgeMs, label: document.querySelector(".track-subtitle").textContent };
+  });
+  check("remise à zéro du calage", afterReset.nudgeMs === 0 && Math.abs(afterReset.duration - wav.duration) < 0.002 && !/calage/.test(afterReset.label),
+    `nudge=${afterReset.nudgeMs} · ${afterReset.duration.toFixed(3)} s · ${afterReset.label}`);
+
   // 8. sauvegarde du projet
   const dl4 = await Promise.all([
     page.waitForEvent("download", { timeout: 20000 }),

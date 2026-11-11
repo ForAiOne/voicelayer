@@ -89,7 +89,9 @@ Deux façons de le régler :
 - **Avant la prise** : champ **Décalage matériel (ms)** dans le panneau Microphone.
   Il est mémorisé pour le micro sélectionné. Positif avance la prise.
 - **Après la prise** : boutons **◀ 10 ms** / **10 ms ▶** sur la piste, qui recalent
-  l'enregistrement déjà fait, par pas de 10 ms, sans ré-enregistrer.
+  l'enregistrement déjà fait, par pas de 10 ms, sans ré-enregistrer. Le calage cumulé
+  s'affiche en permanence sur la piste (`calage +40 ms`) et le bouton **↺ 0** l'annule.
+  Il est conservé dans la sauvegarde du projet.
 
 Méthode de calibration : enregistre en chantant par-dessus une piste existante, écoute
 le résultat, puis recale la nouvelle piste jusqu'à ce que les deux attaques coïncident.

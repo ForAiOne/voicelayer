@@ -907,6 +907,7 @@ function renderTracks() {
 
   tracks.forEach((track, index) => {
     const silent = typeof track.peak === "number" && track.peak < SILENT_PEAK;
+    const nudgeMs = Math.round(track.nudgeMs || 0);
     const card = document.createElement("article");
     card.className = "track-card" + (track.muted ? " is-muted" : "") + (silent ? " is-silent" : "");
 
@@ -920,6 +921,7 @@ function renderTracks() {
     const sub = document.createElement("div");
     sub.className = "track-subtitle";
     sub.textContent = `${fmt(track.duration || 0)} · WAV ${track.sampleRate || ctx?.sampleRate || 0} Hz · ${Math.round((track.blob?.size || 0) / 1024)} Ko`
+      + (nudgeMs ? ` · calage ${nudgeMs > 0 ? "+" : ""}${nudgeMs} ms` : "")
       + (silent ? " · ⚠ SILENCIEUSE (micro sans signal)" : "");
     info.append(title, sub);
 
@@ -977,7 +979,15 @@ function renderTracks() {
     later.textContent = "10 ms ▶";
     later.title = "Retarder cette piste de 10 ms";
     later.addEventListener("click", () => nudgeTrack(track, 10));
-    nudge.append(earlier, later);
+    const reset = document.createElement("button");
+    reset.type = "button";
+    reset.textContent = nudgeMs ? "↺ 0" : "0";
+    reset.title = nudgeMs
+      ? `Annuler le calage (${nudgeMs > 0 ? "+" : ""}${nudgeMs} ms). Les échantillons coupés au tout début ne reviennent pas.`
+      : "Aucun calage en cours";
+    reset.disabled = !nudgeMs;
+    reset.addEventListener("click", () => resetNudge(track));
+    nudge.append(earlier, later, reset);
 
     const save = document.createElement("button");
     save.type = "button";
@@ -1010,29 +1020,52 @@ function renderTracks() {
 
 /* --------------------------- recalage d'une piste ----------------------- */
 
+/* Décale réellement les échantillons et mémorise le cumul, pour qu'il reste
+   visible sur la piste et qu'il survive à une sauvegarde du projet. */
+async function shiftTrack(track, ms) {
+  if (!ms) return;
+  const pcm = await readPcm16(track.blob);
+  const shift = Math.round((ms / 1000) * pcm.sampleRate);
+  let out;
+
+  if (shift > 0) {
+    out = new Int16Array(pcm.samples.length + shift);
+    out.set(pcm.samples, shift);
+  } else {
+    const cut = Math.min(-shift, pcm.samples.length);
+    out = pcm.samples.slice(cut);
+  }
+
+  track.blob = wavFromInt16(out, pcm.sampleRate, 1);
+  track.duration = out.length / pcm.sampleRate;
+  track.nudgeMs = Math.round((track.nudgeMs || 0) + ms);
+  await storeItem("tracks", track);
+  bufferCache.delete(`${track.id}:${track.createdAt}`);
+  renderTracks();
+}
+
 async function nudgeTrack(track, ms) {
   if (state !== "idle") { setStatus("Arrête la lecture ou l'enregistrement pour recaler une piste."); return; }
   try {
-    const pcm = await readPcm16(track.blob);
-    const shift = Math.round((ms / 1000) * pcm.sampleRate);
-    let out;
-
-    if (shift > 0) {
-      out = new Int16Array(pcm.samples.length + shift);
-      out.set(pcm.samples, shift);
-    } else {
-      const cut = Math.min(-shift, pcm.samples.length);
-      out = pcm.samples.slice(cut);
-    }
-
-    track.blob = wavFromInt16(out, pcm.sampleRate, 1);
-    track.duration = out.length / pcm.sampleRate;
-    await storeItem("tracks", track);
-    bufferCache.delete(`${track.id}:${track.createdAt}`);
-    renderTracks();
-    setStatus(`${track.name || "Piste"} recalée de ${ms > 0 ? "+" : ""}${ms} ms.`);
+    await shiftTrack(track, ms);
+    setStatus(`${track.name || "Piste"} recalée de ${ms > 0 ? "+" : ""}${ms} ms — calage total ${track.nudgeMs > 0 ? "+" : ""}${track.nudgeMs} ms.`);
   } catch (error) {
     setStatus(`Recalage impossible : ${error.message}`);
+  }
+}
+
+async function resetNudge(track) {
+  if (state !== "idle") { setStatus("Arrête la lecture ou l'enregistrement pour recaler une piste."); return; }
+  if (!track.nudgeMs) return;
+  try {
+    const total = track.nudgeMs;
+    await shiftTrack(track, -total);
+    track.nudgeMs = 0;
+    await storeItem("tracks", track);
+    renderTracks();
+    setStatus(`Calage de ${track.name || "la piste"} remis à 0 ms (${total > 0 ? "+" : ""}${total} ms annulés).`);
+  } catch (error) {
+    setStatus(`Remise à zéro impossible : ${error.message}`);
   }
 }
 
@@ -1172,6 +1205,8 @@ async function saveProject() {
         createdAt: track.createdAt,
         sampleRate: track.sampleRate,
         duration: track.duration,
+        nudgeMs: track.nudgeMs || 0,
+        peak: typeof track.peak === "number" ? track.peak : undefined,
         wav: arrayBufferToBase64(await track.blob.arrayBuffer()),
       });
     }
@@ -1206,6 +1241,8 @@ async function loadProjectFile(file) {
         blob: new Blob([buffer], { type: "audio/wav" }),
         sampleRate: item.sampleRate || ctx.sampleRate,
         duration: item.duration || 0,
+        nudgeMs: Math.round(item.nudgeMs || 0),
+        peak: typeof item.peak === "number" ? item.peak : undefined,
         volume: typeof item.volume === "number" ? item.volume : 1,
         muted: !!item.muted,
         createdAt: item.createdAt || Date.now(),
