@@ -61,17 +61,56 @@ async function launch(browser, silent) {
     await page.goto(APP_URL);
     await page.waitForFunction(() => /Hz/.test(document.getElementById("enginePill").textContent), null, { timeout: 20000 });
 
+    // Une piste d'accompagnement existante : c'est elle que l'utilisateur doit
+    // entendre pendant la prise, même si son micro est muet.
+    await page.evaluate(async () => {
+      const sr = 44100, frames = sr * 2;
+      const buf = new ArrayBuffer(44 + frames * 2);
+      const v = new DataView(buf);
+      const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+      w(0, "RIFF"); v.setUint32(4, 36 + frames * 2, true); w(8, "WAVE");
+      w(12, "fmt "); v.setUint32(16, 16, true); v.setUint16(20, 1, true);
+      v.setUint16(22, 1, true); v.setUint32(24, sr, true); v.setUint32(28, sr * 2, true);
+      v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, "data"); v.setUint32(40, frames * 2, true);
+      for (let i = 0; i < frames; i++) v.setInt16(44 + i * 2, Math.round(12000 * Math.sin(2 * Math.PI * 440 * i / sr)), true);
+      const blob = new Blob([buf], { type: "audio/wav" });
+
+      const db = await new Promise((res, rej) => { const r = indexedDB.open("voicelayer-db", 1); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+      await new Promise((res, rej) => {
+        const tx = db.transaction("tracks", "readwrite");
+        tx.objectStore("tracks").put({ id: "accompagnement", name: "Accompagnement", blob, sampleRate: sr, duration: 2, volume: 1, muted: false, createdAt: Date.now() });
+        tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+      });
+    });
+    await page.reload({ waitUntil: "load" });
+    await page.waitForFunction(() => /Hz/.test(document.getElementById("enginePill").textContent), null, { timeout: 20000 });
+    await page.waitForSelector(".track-card", { timeout: 15000 });
+
     await page.click("#recordBtn");
-    await page.waitForTimeout(4200); // au-delà du décompte
-    const state = await page.evaluate(() => ({
+    await page.waitForFunction(() => document.getElementById("micState").textContent === "Enregistrement", null, { timeout: 15000 });
+    await page.waitForTimeout(2600);   // le témoin "aucun son" se déclenche à 2 s
+
+    const during = await page.evaluate(() => ({
       status: document.getElementById("statusMessage").textContent,
+      playing: playSources.length,
+      isPlaying: playSources.some((s) => s.buffer && s.buffer.duration > 0),
+      locked: document.getElementById("recordBtn").disabled,
+    }));
+
+    check("micro muet : la prise DÉMARRE quand même", during.locked === true, `état verrouillé=${during.locked}`);
+    check("micro muet : l'accompagnement est bien lancé", during.playing > 0 && during.isPlaying, `${during.playing} source(s) audio`);
+    check("micro muet : un avertissement s'affiche sans bloquer", /Aucun son depuis 2 secondes/.test(during.status), during.status.slice(0, 90));
+
+    await page.click("#stopBtn");
+    await page.waitForTimeout(1500);
+    const after = await page.evaluate(() => ({
       cards: document.querySelectorAll(".track-card").length,
-      micState: document.getElementById("micState").textContent,
+      subtitle: document.querySelectorAll(".track-subtitle")[1] ? document.querySelectorAll(".track-subtitle")[1].textContent : "",
       recordDisabled: document.getElementById("recordBtn").disabled,
     }));
-    check("micro muet : la prise est annulée pendant le décompte",
-      state.cards === 0 && /annulée/i.test(state.status) && !state.recordDisabled,
-      `${state.cards} piste(s) · ${state.status.slice(0, 80)}`);
+
+    check("la prise silencieuse est conservée et signalée", after.cards === 2 && /SILENCIEUSE/.test(after.subtitle), `${after.cards} piste(s) · ${after.subtitle}`);
+    check("boutons rendus après la prise", after.recordDisabled === false, `enregistrer désactivé=${after.recordDisabled}`);
     await browser.close();
   }
 

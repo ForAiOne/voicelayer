@@ -53,6 +53,7 @@ let playSources = [], playGains = new Map();
 let bufferCache = new Map();
 let timerInterval = null;
 let countdownInterval = null;
+let takeWatchdog = null;
 
 /* ------------------------------ utilitaires ------------------------------ */
 
@@ -643,18 +644,9 @@ async function startRecording() {
       clearInterval(countdownInterval);
       countdownInterval = null;
 
-      // Garde-fou : ne pas gaspiller une prise entière si le micro est muet.
-      if (maxMicPeak < SILENT_PEAK) {
-        state = "idle";
-        releaseMic();
-        setTransportLocked(false);
-        ui.timer.textContent = "00:00";
-        ui.micState.textContent = "Micro muet";
-        ui.micState.className = "mic-state error";
-        setStatus("Prise annulée avant de commencer : le micro n'a envoyé aucun son pendant le décompte (niveau micro 0 %). Rien n'a été enregistré. Vérifie le périphérique affiché au-dessus, puis le niveau d'entrée dans Windows.");
-        return;
-      }
-
+      // Pas de blocage ici : se taire pendant le décompte est normal, c'est le
+      // moment où l'on se prépare. Le silence éventuel est signalé PENDANT la
+      // prise, et la récupération automatique reste en filet.
       await launchTake(backing);
     }, 1000);
   } catch (error) {
@@ -700,6 +692,17 @@ async function launchTake(backing) {
     ? "Enregistrement en cours… chante sur les pistes déjà enregistrées."
     : "Enregistrement en cours…");
 
+  // Avertissement, jamais un blocage : si rien n'est arrivé après 2 secondes,
+  // on le dit et l'enregistrement continue (l'accompagnement est audible).
+  takeWatchdog = setTimeout(() => {
+    if (state !== "recording") return;
+    if (maxMicPeak < SILENT_PEAK && maxRecPeak < SILENT_PEAK) {
+      ui.micState.textContent = "Aucun son ?";
+      ui.micState.className = "mic-state error";
+      setStatus("Aucun son depuis 2 secondes. Si tu es en train de chanter, vérifie le micro et le niveau d'entrée Windows. L'enregistrement continue ; la prise sera récupérée automatiquement si le signal revient.");
+    }
+  }, 2000);
+
   timerInterval = setInterval(() => {
     ui.timer.textContent = fmt(Math.max(0, ctx.currentTime - startAt));
   }, 100);
@@ -720,6 +723,7 @@ async function stopRecording() {
 
   state = "finalizing";
   if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+  if (takeWatchdog) { clearTimeout(takeWatchdog); takeWatchdog = null; }
   stopPlayback();
 
   const done = await new Promise((resolve) => {
@@ -824,6 +828,7 @@ async function finalizeTake(data) {
   } catch (error) {
     setStatus(`Piste non enregistrée : ${error.message}`);
   } finally {
+    if (takeWatchdog) { clearTimeout(takeWatchdog); takeWatchdog = null; }
     releaseMic();
     state = "idle";
     setTransportLocked(false);
